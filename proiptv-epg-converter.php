@@ -25,6 +25,7 @@
 
 require_once 'Logger.php';
 require_once 'Converter.php';
+require_once 'PerfCollector.php';
 
 /**
  * @return array|false
@@ -62,10 +63,15 @@ if (str_ends_with($working_dir, '/')) {
     $working_dir  = trim($working_dir, '/');
 }
 
+$perf = new PerfCollector();
+$perf->reset('start');
 foreach ($config['sources'] as $item) {
     $converter = new Converter($item, $working_dir);
     $converter->convert($settings);
 }
+$perf->setLabel('end');
+$report_all = $perf->getReportItem(PerfCollector::TIME, 'start', 'end');
+Logger::log(severity::Inf, "Total conversion time: $report_all secs");
 
 if (!empty($settings)) {
     file_put_contents('settings.json', json_encode($settings, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));

@@ -92,7 +92,16 @@ class Converter extends SqlWrapper
 
         $id = $this->params['id'];
         $url = $this->params['url'];
+        $manual = $this->params['manual_check'] ?? false;
         $etag = '';
+
+        if ($manual !== false && isset($settings[$id]['last_check'])) {
+            $last_check = $settings[$id]['last_check'];
+            if ($last_check + $manual * 3600 > time()) {
+                Logger::log(severity::Err, "Manual download is not expired.");
+                return 2;
+            }
+        }
 
         $filename = "$this->working_dir/$id/" . basename($this->params['url']);
 
@@ -128,7 +137,7 @@ class Converter extends SqlWrapper
         $ch = curl_init();
         if ($ch === false) {
             Logger::log(severity::Err, 'Curl init failed!');
-            return false;
+            return 1;
         }
 
         Logger::log(severity::Dbg, "Request headers...");
@@ -179,7 +188,7 @@ class Converter extends SqlWrapper
         $ret = 0;
         if ($http_code == 301 || $http_code == 304) {
             Logger::log(severity::Inf, sprintf('HTTP code (%d) in %.3fs', $http_code, $execution_tm));
-            Logger::log(severity::Err, "Server response that file is not changed");
+            Logger::log(severity::Inf, "Server response that file is not changed");
             $ret = 2;
         } else if (file_exists($filename)) {
             Logger::log(severity::Inf,
@@ -188,7 +197,11 @@ class Converter extends SqlWrapper
         } else {
             Logger::log(severity::Err, sprintf('HTTP code (%d) in %.3fs', $http_code, $execution_tm));
             Logger::log(severity::Err, "Saved file '$filename' is not exist!");
-            return 1;
+            $ret = 1;
+        }
+
+        if ($ret !== 1) {
+            $settings[$id]['last_check'] = time();
         }
 
         Logger::log_separator();
@@ -618,10 +631,9 @@ class Converter extends SqlWrapper
             Logger::log(severity::Inf, "Uncompress time: $report_uncompress secs");
             Logger::log(severity::Inf, "Indexing XMLTV source time: $report_reindex secs");
             Logger::log(severity::Inf, "Json generation time: $report_convert secs");
-            Logger::log(severity::Inf, "Total Conversion time: $report_all secs");
-            Logger::log_separator();
+            Logger::log(severity::Inf, "Process conversion time: $report_all secs");
 
-            $settings[$name]['last_check'] = time();
+            $settings[$name]['last_update'] = time();
             $ret = true;
         } catch(Exception $ex) {
             Logger::log(severity::Err, $ex->getMessage());
@@ -638,6 +650,7 @@ class Converter extends SqlWrapper
                 unlink($uncompressed);
             }
         }
+        Logger::log_separator();
 
         return $ret;
     }
