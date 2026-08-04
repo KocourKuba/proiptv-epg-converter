@@ -34,7 +34,6 @@ class Converter extends SqlWrapper
 {
     protected static array $http_response_headers;
     protected array $params;
-
     protected string $working_dir;
 
     /**
@@ -95,6 +94,8 @@ class Converter extends SqlWrapper
         $manual = $this->params['manual_check'] ?? false;
         $etag = '';
 
+        Logger::log(severity::Inf, "Begin download: $url");
+
         if ($manual !== false && isset($settings[$id]['last_check'])) {
             $last_check = $settings[$id]['last_check'];
             if ($last_check + $manual * 3600 > time()) {
@@ -134,77 +135,85 @@ class Converter extends SqlWrapper
 
         $opts[CURLOPT_CUSTOMREQUEST] = "GET";
 
-        $ch = curl_init();
-        if ($ch === false) {
-            Logger::log(severity::Err, 'Curl init failed!');
-            return 1;
-        }
+        try {
+            $ch = curl_init();
+            if ($ch === false) {
+                throw new Exception('Curl init failed!');
+            }
 
-        Logger::log(severity::Dbg, "Request headers...");
-        foreach ($opts[CURLOPT_HTTPHEADER] as $v) {
-            Logger::log(severity::Dbg, $v);
-        }
+            Logger::log(severity::Dbg, "Request headers...");
+            foreach ($opts[CURLOPT_HTTPHEADER] as $v) {
+                Logger::log(severity::Dbg, $v);
+            }
 
-        foreach ($opts as $k => $v) {
-            curl_setopt($ch, $k, $v);
-        }
+            foreach ($opts as $k => $v) {
+                curl_setopt($ch, $k, $v);
+            }
 
-        Logger::log(severity::Inf, "Begin download: $url");
+            $start_tm = microtime(true);
+            $content = curl_exec($ch);
+            $execution_tm = microtime(true) - $start_tm;
+            $error_no = curl_errno($ch);
+            $error_desc = curl_error($ch);
+            $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 
-        $start_tm = microtime(true);
-        $content = curl_exec($ch);
-        $execution_tm = microtime(true) - $start_tm;
-        $error_no = curl_errno($ch);
-        $error_desc = curl_error($ch);
-        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            if (!is_null($fp)) {
+                fclose($fp);
+                $fp = null;
+            }
 
-        if (!is_null($fp)) {
-            fclose($fp);
-        }
+            Logger::log(severity::Dbg, "Response headers...");
+            foreach (self::get_response_headers() as $k => $v) {
+                Logger::log(severity::Dbg, "$k: $v");
+            }
 
-        Logger::log(severity::Dbg, "Response headers...");
-        foreach (self::get_response_headers() as $k => $v) {
-            Logger::log(severity::Dbg, "$k: $v");
-        }
+            if ($http_code < 200 || ($http_code >= 300 && $http_code != 301 && $http_code != 304)) {
+                throw new Exception("HTTP request failed ($http_code)\nHTTP response: $content");
+            }
 
-        if ($http_code < 200 || ($http_code >= 300 && $http_code != 301 && $http_code != 304)) {
-            Logger::log(severity::Err, 'HTTP request failed (' . $http_code . ')');
-            Logger::log(severity::Err, 'HTTP response: ' . $content);
-            return 1;
-        }
+            if ($error_no !== 0) {
+                $msg = sprintf('CURL errno: %s (%s); HTTP error: %s', $error_no, $error_desc, $http_code);
+                throw new Exception($msg);
+            }
 
-        if ($error_no !== 0) {
-            $msg = sprintf('CURL errno: %s (%s); HTTP error: %s', $error_no, $error_desc, $http_code);
-            Logger::log(severity::Err, $msg);
-            return 1;
-        }
+            $new_etag = self::get_response_header('etag');
+            if (!empty($new_etag) && $etag !== $new_etag) {
+                Logger::log(severity::Inf, "Save new ETag ($new_etag) for: $url");
+                $settings[$id]['etag'] = $new_etag;
+            }
 
-        $new_etag = self::get_response_header('etag');
-        if (!empty($new_etag) && $etag !== $new_etag) {
-            Logger::log(severity::Inf, "Save new ETag ($new_etag) for: $url");
-            $settings[$id]['etag'] = $new_etag;
-        }
+            $ret = 0;
+            if ($http_code == 301 || $http_code == 304) {
+                Logger::log(severity::Inf, sprintf('HTTP code (%d) in %.3fs', $http_code, $execution_tm));
+                Logger::log(severity::Inf, "Server response that file is not changed");
+                $ret = 2;
+            } else if (file_exists($filename)) {
+                Logger::log(severity::Inf,
+                    sprintf('Save file: HTTP OK (%d, %d bytes) in %.3fs', $http_code, filesize($filename), $execution_tm));
+                Logger::log(severity::Inf, "Downloaded file saved to: $filename");
+            } else {
+                Logger::log(severity::Err, sprintf('HTTP code (%d) in %.3fs', $http_code, $execution_tm));
+                Logger::log(severity::Err, "Saved file '$filename' is not exist!");
+                $ret = 1;
+            }
 
-        $ret = 0;
-        if ($http_code == 301 || $http_code == 304) {
-            Logger::log(severity::Inf, sprintf('HTTP code (%d) in %.3fs', $http_code, $execution_tm));
-            Logger::log(severity::Inf, "Server response that file is not changed");
-            $ret = 2;
-        } else if (file_exists($filename)) {
-            Logger::log(severity::Inf,
-                sprintf('Save file: HTTP OK (%d, %d bytes) in %.3fs', $http_code, filesize($filename), $execution_tm));
-            Logger::log(severity::Inf, "Downloaded file saved to: $filename");
-        } else {
-            Logger::log(severity::Err, sprintf('HTTP code (%d) in %.3fs', $http_code, $execution_tm));
-            Logger::log(severity::Err, "Saved file '$filename' is not exist!");
+            if ($ret !== 1) {
+                $settings[$id]['last_check'] = time();
+            }
+        } catch (Exception $ex) {
+            Logger::log(severity::Err, $ex->getMessage());
+            if (!is_null($fp)) {
+                fclose($fp);
+            }
+
+            if (file_exists($filename)) {
+                unlink($filename);
+            }
             $ret = 1;
         }
 
-        if ($ret !== 1) {
-            $settings[$id]['last_check'] = time();
-        }
-
         Logger::log_separator();
+
         return $ret;
     }
 
@@ -237,7 +246,7 @@ class Converter extends SqlWrapper
 
     public function indexing(string $filename): bool
     {
-        /// Reindex channels and picons
+        // Reindex channels and picons
         Logger::log(severity::Err, 'Start index channels and picons...');
 
         libxml_use_internal_errors(true);
@@ -465,15 +474,24 @@ class Converter extends SqlWrapper
      */
     protected function db2json(string $path, string $filename): bool
     {
+        Logger::log(severity::Err, 'Start JSON conversion...');
+
         if (!file_exists($path)) {
             Logger::log(severity::Err, "File $path does not exist");
             return false;
         }
 
-        $ext_epg = function($items, $tag, $name) {
-            $value = get_node_value($tag, $name);
+        $write_node = function(&$item, $tag, $node_name, $tag_name = null) {
+            $value = get_node_value($tag, $node_name);
             if (!empty($value)) {
-                $items[$name] = $value;
+                $item[$tag_name ?? $node_name] = $value;
+            }
+        };
+
+        $write_nodes = function(&$item, $tag, $node_name, $tag_name = null) {
+            $value = get_node_values($tag, $node_name);
+            if (!empty($value)) {
+                $item[$tag_name ?? $node_name] = implode(", ", $value);
             }
         };
 
@@ -482,7 +500,6 @@ class Converter extends SqlWrapper
             Logger::log(severity::Err, "File $path can't be opened");
             return false;
         }
-
 
         $query = 'SELECT DISTINCT channel_id, picon_url FROM epg_channels as ch LEFT JOIN epg_picons as pic ON ch.picon_hash = pic.picon_hash;';
         $total = 0;
@@ -497,8 +514,7 @@ class Converter extends SqlWrapper
                 continue;
             }
 
-            $icon = $row['picon_url'];
-            $items = array();
+            $item_str = '';
             foreach ($channel_positions as $pos) {
                 fseek($file, $pos['start']);
                 $length = $pos['end'] - $pos['start'];
@@ -516,44 +532,59 @@ class Converter extends SqlWrapper
                     continue;
                 }
 
+                $item = array();
                 foreach ($xml_node->getElementsByTagName('programme') as $tag) {
-                    $item = array();
                     $item['name'] = get_node_value($tag, 'title');
                     $item['time'] = strtotime($tag->getAttribute('start'));
                     $item['time_to'] = strtotime($tag->getAttribute('stop'));
                     $item['descr'] = get_node_value($tag, 'desc');
 
-                    $ext_epg($item, $tag, 'sub-title');
-                    $ext_epg($item, $tag, 'category');
-                    $ext_epg($item, $tag, 'date');
-                    $ext_epg($item, $tag, 'country');
-                    $ext_epg($item, $tag, 'image');
-
-                    foreach ($tag->getElementsByTagName('credits') as $sub_tag) {
-                        $ext_epg($item, $sub_tag, 'director');
-                        $ext_epg($item, $sub_tag, 'producer');
-                        $ext_epg($item, $sub_tag, 'actor');
-                        $ext_epg($item, $sub_tag, 'presenter');
-                        $ext_epg($item, $sub_tag, 'writer');
-                        $ext_epg($item, $sub_tag, 'editor');
-                        $ext_epg($item, $sub_tag, 'composer');
+                    $icon = get_node_attribute($tag, 'icon', 'src');
+                    if (!empty($icon) && is_proto_http($icon)) {
+                        $item['icon'] = $icon;
                     }
 
-                    $items[] = $item;
+                    $write_node($item, $tag, 'sub-title');
+                    $write_node($item, $tag, 'category');
+                    $write_node($item, $tag, 'date');
+                    $write_node($item, $tag, 'country');
+
+                    foreach ($tag->getElementsByTagName('credits') as $sub_tag) {
+                        $write_nodes($item, $sub_tag, 'director');
+                        $write_nodes($item, $sub_tag, 'producer');
+                        $write_nodes($item, $sub_tag, 'actor');
+                        $write_nodes($item, $sub_tag, 'presenter');
+                        $write_nodes($item, $sub_tag, 'writer');
+                        $write_nodes($item, $sub_tag, 'editor');
+                        $write_nodes($item, $sub_tag, 'composer');
+                    }
+                    if (!empty($item_str)) {
+                        $item_str .= ",\n";
+                    }
+                    $item_str .= json_encode($item, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
                 }
             }
 
-            if (!empty($items)) {
-                $all_items = array('epg_icon' => $icon, 'epg_data' => $items);
-                $json_file = $path . '/' . str_replace(array('/',':'), array('%2F','%3A'), $channel_id) . '.json';
-                $content = json_encode($all_items, JSON_UNESCAPED_UNICODE);
-                file_put_contents($json_file, $content);
+            if (!empty($item_str)) {
+                $str = '{' . PHP_EOL;
+                if (!empty($row['picon_url'])) {
+                    $str .= trim(json_encode(array('epg_picon' => $row['picon_url']), JSON_UNESCAPED_SLASHES), "{}") . ',' . PHP_EOL;
+                }
+                $str .= '"epg_data": [' . PHP_EOL;
+                $str .= $item_str;
+                $str .= PHP_EOL . ']}';
+
+                //$json_file = $path . '/' . str_replace(array('/',':'), array('%2F','%3A'), $channel_id) . '.json';
+                $json_file = $path . '/' . str_replace('/', '%2F', $channel_id) . '.json';
+                $f = fopen($json_file, 'wb');
+                fwrite($f, $str);
+                fclose($f);
                 ++$total;
             }
         }
 
         fclose($file);
-        Logger::log(severity::Inf, "Json files generated: $total from: $stored");
+        Logger::log(severity::Inf, "Success Json files generated: $total from: $stored");
         Logger::log_separator();
 
         return true;
