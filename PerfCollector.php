@@ -1,0 +1,194 @@
+<?php
+/**
+ * The MIT License (MIT)
+ *
+ * @Author: sharky72 (https://github.com/KocourKuba)
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to
+ * deal in the Software without restriction, including without limitation the
+ * rights to use, copy, modify, merge, publish, distribute, sublicense
+ * of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
+ */
+
+class PerfCollector
+{
+    const TIME = 'Time';
+    const USER_MODE_TIME = 'UserModeTime';
+    const MEMORY_LIMIT = 'MemoryLimit';
+    const MEMORY_USAGE_KB = 'MemoryUsageKb';
+    const MEMORY_USAGE_MB = 'MemoryUsageMb';
+    const MEMORY_USAGE_DIFF_KB = 'MemoryUsageDiffKb';
+    const MEMORY_USAGE_DIFF_MB = 'MemoryUsageDiffMb';
+    const PEAK_MEMORY_USAGE_KB = 'PeakMemoryUsageKb';
+    const PEAK_MEMORY_USAGE_MB = 'PeakMemoryUsageMb';
+
+    const STAT_TIME = 'time';
+    const STAT_UTIME = 'utime';
+    const STAT_MEMORY = 'memory';
+    const STAT_PMEMORY = 'peak_memory';
+    const STAT_USAGE = 'usage';
+
+    /**
+     * @var array
+     */
+    private array $labels = array();
+
+    /**
+     * Clear all labels
+     * @param string $firstLabel
+     */
+    public function reset(string $firstLabel = ''): void
+    {
+        $this->labels = array();
+        if (!empty($firstLabel)) {
+            $this->setLabel($firstLabel);
+        }
+    }
+
+    /**
+     * Add a new label for measure
+     * @param string $label Name for the label
+     */
+    public function setLabel(string $label): void
+    {
+        if (array_key_exists($label, $this->labels)) {
+            return;
+        }
+
+        $this->labels[$label] = array(
+            self::STAT_TIME => microtime(true),
+            self::STAT_MEMORY => memory_get_usage(),
+            self::STAT_PMEMORY => memory_get_peak_usage()
+        );
+
+        if (function_exists('getrusage')) {
+            $this->labels[$label][self::STAT_USAGE] = getrusage();
+        }
+    }
+
+    /**
+     * Get the labels count
+     * @return int
+     */
+    public function getLabelsCount(): int
+    {
+        return count($this->labels);
+    }
+
+    /**
+     * Obtain a memory limit set in php.ini
+     */
+    public static function getMemoryLimit(): false|string
+    {
+        return ini_get('memory_limit');
+    }
+
+    /**
+     * Obtain a report item with the measures between two labels
+     * if no start label set - used first label in array
+     * if no end label set - used last label in array
+     * @param string $item
+     * @param false|string $startLabel Start label
+     * @param false|string $endLabel End label
+     * @return mixed
+     */
+    public function getReportItem(string $item, false|string $startLabel = false, false|string $endLabel = false): mixed
+    {
+        if (empty($this->labels)) {
+            return array();
+        }
+
+        $report = $this->getFullReport($startLabel, $endLabel);
+
+        return $report[$item] ?? 0;
+    }
+
+    /**
+     * Obtain a report array with the measures between two labels
+     * @param bool|string $startLabel Start label
+     * @param false|string $endLabel End label
+     * @return array
+     */
+    public function getFullReport(bool|string $startLabel = false, false|string $endLabel = false): array
+    {
+        if ($startLabel === false) {
+            reset($this->labels);
+            $startLabel = (string)key($this->labels);
+        }
+
+        if ($endLabel === false) {
+            $endLabel = (string)key(array_slice($this->labels, -1, 1, true));
+        }
+
+        if (!isset($this->labels[$startLabel]) || !isset($this->labels[$endLabel])) {
+            return array();
+        }
+
+        $time = $this->labels[$endLabel][self::STAT_TIME] - $this->labels[$startLabel][self::STAT_TIME];
+        $memory = $this->labels[$endLabel][self::STAT_MEMORY] - $this->labels[$startLabel][self::STAT_MEMORY];
+        $memoryPeak = memory_get_peak_usage();
+
+        // Prepare report.
+        $report[self::TIME] = round($time, 2);
+        $report[self::MEMORY_LIMIT] = self::getMemoryLimit();
+        $report[self::MEMORY_USAGE_KB] = round($this->labels[$endLabel][self::STAT_MEMORY] / 1024);
+        $report[self::MEMORY_USAGE_MB] = round($this->labels[$endLabel][self::STAT_MEMORY] / 1024 / 1024, 2);
+        $report[self::MEMORY_USAGE_DIFF_KB] = round($memory / 1024);
+        $report[self::MEMORY_USAGE_DIFF_MB] = round($memory / 1024 / 1024, 2);
+        $report[self::PEAK_MEMORY_USAGE_KB] = round($memoryPeak / 1024);
+        $report[self::PEAK_MEMORY_USAGE_MB] = round($memoryPeak / 1024 / 1024, 2);
+
+        if (function_exists('getrusage')) {
+            $usage = $this->getUsageDifference($startLabel, $endLabel);
+            $report[self::USER_MODE_TIME] = $usage[self::STAT_UTIME];
+        }
+
+        return $report;
+    }
+
+    ////////////////////////////////////////////////////////////
+    // private functions
+
+    /**
+     * Get the usage difference between two labels
+     * @param string $startLabel Start label to measure usage against
+     * @param string $endLabel End label to compare usage against start label
+     * @return array Usage array with times compared
+     */
+    private function getUsageDifference(string $startLabel, string $endLabel): array
+    {
+        $arr_start = $this->labels[$startLabel][self::STAT_USAGE];
+        $arr_end = $this->labels[$endLabel][self::STAT_USAGE];
+
+        // Add user mode time.
+        $arr_start[self::STAT_UTIME] = ($arr_start['ru_utime.tv_usec'] / 1000000) + $arr_start['ru_utime.tv_sec'];
+        $arr_end[self::STAT_UTIME] = ($arr_end['ru_utime.tv_usec'] / 1000000) + $arr_end['ru_utime.tv_sec'];
+
+        // Unset time splits.
+        unset(
+            $arr_start['ru_utime.tv_usec'],
+            $arr_start['ru_utime.tv_sec'],
+            $arr_end['ru_utime.tv_usec'],
+            $arr_end['ru_utime.tv_sec']
+        );
+
+        foreach ($arr_start as $key => $value) {
+            $arrDiff[$key] = $arr_end[$key] - $value;
+        }
+
+        return $arrDiff;
+    }
+}
