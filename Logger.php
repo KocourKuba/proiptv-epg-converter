@@ -29,13 +29,13 @@
  * @param string $method
  * @return void
  */
-enum severity
+enum severity : int
 {
-    case Dbg;
-    case Notice;
-    case Inf;
-    case Warn;
-    case Err;
+    case Dbg = 0;
+    case Notice = 1;
+    case Inf = 2;
+    case Warn = 3;
+    case Err = 4;
 }
 
 class Logger
@@ -71,7 +71,7 @@ class Logger
      */
     public static function log(severity $severity, string $value): void
     {
-        if ($severity < self::$severity) {
+        if ($severity->value < self::$severity->value) {
             return;
         }
 

@@ -55,7 +55,7 @@ class Converter extends SqlWrapper
         }
 
         Logger::setLogName("$this->working_dir/converter.log");
-        //Logger::setSeverity(severity::Dbg);
+        Logger::setSeverity(severity::Dbg);
     }
 
     /**
