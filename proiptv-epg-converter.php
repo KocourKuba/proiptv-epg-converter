@@ -23,56 +23,12 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-require_once 'Logger.php';
 require_once 'Converter.php';
-require_once 'PerfCollector.php';
 
 /**
  * @return array|false
  */
 ini_set('memory_limit', '256M');
 
-Logger::setLogName('converter.log');
-//Logger::setSeverity(severity::Dbg);
-
-if (!file_exists('sources.json')) {
-    Logger::log(severity::Err, 'sources.json file not found');
-    return false;
-}
-
-$config = json_decode(file_get_contents('sources.json'), true);
-
-if ($config === false) {
-    Logger::log(severity::Err, 'Bad sources.json configuration');
-    return die();
-}
-
-if (!isset($config['sources'])) {
-    Logger::log(severity::Err, 'No source defined in config.json');
-    return die();
-}
-
-if (file_exists('settings.json')) {
-    $settings = json_decode(file_get_contents('settings.json'), true);
-} else {
-    $settings = array();
-}
-
-$working_dir = $config['dir'] ?? getcwd();
-if (str_ends_with($working_dir, '/')) {
-    $working_dir  = trim($working_dir, '/');
-}
-
-$perf = new PerfCollector();
-$perf->reset('start');
-foreach ($config['sources'] as $item) {
-    $converter = new Converter($item, $working_dir);
-    $converter->convert($settings);
-}
-$perf->setLabel('end');
-$report_all = $perf->getReportItem(PerfCollector::TIME, 'start', 'end');
-Logger::log(severity::Inf, "Total conversion time: $report_all secs");
-
-if (!empty($settings)) {
-    file_put_contents('settings.json', json_encode($settings, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
-}
+$converter = new Converter($argv);
+$converter->process();

@@ -55,7 +55,7 @@ class Logger
 
     public static function log_separator(): void
     {
-        $fp = fopen(self::$logName, "ab");
+        $fp = fopen(self::$logName, "a");
         if($fp)
         {
             fwrite($fp, date("[Y.m.d H:i:s] ") . str_repeat('-', 80) . PHP_EOL);
@@ -80,7 +80,7 @@ class Logger
             $value .= PHP_EOL;
         }
 
-        $fp = fopen(self::$logName, "ab");
+        $fp = fopen(self::$logName, "a");
         if($fp)
         {
             fwrite($fp, date("[Y.m.d H:i:s] ") . $value);
