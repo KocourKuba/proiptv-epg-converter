@@ -705,6 +705,8 @@ class Converter extends SqlWrapper
 
     public function process(): void
     {
+        Logger::log(severity::Inf, 'ProIPTV EPG Converter v1.0');
+
         if (!file_exists("$this->working_dir/sources.conf")) {
             Logger::log(severity::Err, 'sources.conf file not found');
             die();
