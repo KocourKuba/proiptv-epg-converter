@@ -91,7 +91,7 @@ function extractGzipFile(string $archive): ?string
 {
     // Check if zlib is enabled
     if (!function_exists('gzopen')) {
-        Logger::log(severity::Err, 'Error: Your PHP has no zlib support enabled.');
+        Logger::log(severity::Err, 'Your PHP has no zlib support enabled.');
         return null;
     }
 
@@ -114,6 +114,45 @@ function extractGzipFile(string $archive): ?string
 
     Logger::log(severity::Err, 'Error ungzipping file.');
     return null;
+}
+
+/**
+ * Decompress/extract a zip archive
+ *
+ * @param string $archive
+ * @return string|null
+ */
+function extractZipArchive(string $archive): ?string
+{
+    if (!class_exists('ZipArchive')) {
+        Logger::log(severity::Err, 'Your PHP version does not support unzip functionality.');
+        return null;
+    }
+
+    $unzip = new ZipArchive;
+    // Check if archive is readable.
+    if ($unzip->open($archive) !== true) {
+        Logger::log(severity::Err, 'Cannot read .zip archive: ' . $archive);
+        return null;
+    }
+
+    // Check if zip is empty
+    $first_file = $unzip->getNameIndex(0);
+    if (empty($first_file)) {
+        $unzip->close();
+        Logger::log(severity::Err, 'Empty zip archive.');
+        return null;
+    }
+
+    $destination = pathinfo($archive, PATHINFO_DIRNAME);
+    if (!$unzip->extractTo($destination)) {
+        $unzip->close();
+        Logger::log(severity::Err, sprintf('Error unzipping file: %s, status: %s', basename($archive), $unzip->getStatusString()));
+        return null;
+    }
+
+    $unzip->close();
+    return $destination . '/' . $first_file;
 }
 
 /**

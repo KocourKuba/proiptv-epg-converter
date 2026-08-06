@@ -140,7 +140,7 @@ class Converter extends SqlWrapper
             $opts[CURLOPT_HTTPHEADER][] = "Host: {$parsed_url['host']}";
         }
 
-        if (!empty($this->settings[$id]['etag'])) {
+        if ($manual === false && !empty($this->settings[$id]['etag'])) {
             $etag = $this->settings[$id]['etag'];
             $opts[CURLOPT_HTTPHEADER][] = "If-None-Match: $etag";
         }
@@ -240,14 +240,21 @@ class Converter extends SqlWrapper
         fclose($handle);
 
         if (0 === mb_strpos($hdr, "\x1f\x8b\x08")) {
-            Logger::log(severity::Inf, 'GZ signature:  ' . bin2hex(substr($hdr, 0, 3)));
+            Logger::log(severity::Dbg, 'GZ signature:  ' . bin2hex(substr($hdr, 0, 3)));
             Logger::log(severity::Inf, 'Ungzipping: ' . $filename);
             $filename = extractGzipFile($filename);
             if (is_null($filename)) {
                 Logger::log(severity::Err, "Failed to unpack $filename");
             }
+        } else if (0 === mb_strpos($hdr, "\x50\x4b\x03\x04")) {
+            Logger::log(severity::Dbg, 'ZIP signature: ' . bin2hex(substr($hdr, 0, 4)));
+            Logger::log(severity::Inf, 'Unzipping: ' . $filename);
+            $filename = extractZipArchive($filename);
+            if (is_null($filename)) {
+                Logger::log(severity::Err, "Failed to unpack $filename");
+            }
         } else if (false !== mb_strpos($hdr, "<?xml")) {
-            Logger::log(severity::Inf, 'XMLT signature:  ' . bin2hex(substr($hdr, 0, 3)));
+            Logger::log(severity::Dbg, 'XMLT signature:  ' . bin2hex(substr($hdr, 0, 3)));
         } else {
             Logger::log(severity::Err, 'Unsupported format! For file: ' . $filename);
             return null;
@@ -259,7 +266,7 @@ class Converter extends SqlWrapper
     public function indexing(string $filename): bool
     {
         // Reindex channels and picons
-        Logger::log(severity::Err, 'Start index channels and picons...');
+        Logger::log(severity::Inf, "Start indexing $filename");
 
         libxml_use_internal_errors(true);
         $file = false;
@@ -372,15 +379,6 @@ class Converter extends SqlWrapper
             $channels = (int)$this->query_value('SELECT count(DISTINCT channel_id) FROM epg_channels;');
             $picons = (int)$this->query_value('SELECT COUNT(*) FROM epg_picons;');
 
-            Logger::log(severity::Inf, "Total channels id's: $channels");
-            Logger::log(severity::Inf, "Total known picons:  $picons");
-
-            /// Reindex positions
-            Logger::log(severity::Inf, 'Start indexing entries...');
-
-
-            Logger::log(severity::Inf, "Indexing positions for: '$filename'");
-
             $query = 'DROP TABLE IF EXISTS epg_entries;';
             $query .= 'CREATE TABLE epg_entries (channel_id STRING NOT NULL, start INTEGER, end INTEGER, UNIQUE (channel_id, start) ON CONFLICT REPLACE);';
             $res = $this->exec_transaction($query);
@@ -461,13 +459,15 @@ class Converter extends SqlWrapper
             $cnt = $this->query_value($query);
 
             if ($cnt) {
-                Logger::log(severity::Inf, "Purged channels without information: $cnt");
                 $this->exec('DELETE FROM epg_channels WHERE channel_id NOT IN (SELECT distinct channel_id FROM epg_entries);');
             }
 
             $total_epg = (int)$this->query_value('SELECT count(DISTINCT channel_id) FROM epg_entries;');
             $total_blocks = (int)$this->query_value('SELECT COUNT(*) FROM epg_entries;');
 
+            Logger::log(severity::Inf, "Total known channels id's: $channels");
+            Logger::log(severity::Inf, "Total channels without information: $cnt");
+            Logger::log(severity::Inf, "Total known picons:  $picons");
             Logger::log(severity::Inf, "Total unique epg id's indexed: $total_epg, total blocks: $total_blocks");
             $ret = true;
         } catch (Exception $ex) {
@@ -486,7 +486,7 @@ class Converter extends SqlWrapper
      */
     protected function db2json(string $path, string $filename): bool
     {
-        Logger::log(severity::Err, 'Start JSON conversion...');
+        Logger::log(severity::Inf, 'Start JSON conversion...');
 
         if (!file_exists($path)) {
             Logger::log(severity::Err, "File $path does not exist");
@@ -596,7 +596,7 @@ class Converter extends SqlWrapper
         }
 
         fclose($file);
-        Logger::log(severity::Inf, "Success Json files generated: $total from: $stored");
+        Logger::log(severity::Inf, "Json files generated: $total from: $stored existing");
         Logger::log_separator();
 
         return true;
@@ -631,11 +631,10 @@ class Converter extends SqlWrapper
             }
 
             Logger::log_separator();
-            Logger::log(severity::Inf, "Start conversion");
-            Logger::log(severity::Inf, "Id: '$name'");
-            Logger::log(severity::Inf, "Url: '$url'");
+            Logger::log(severity::Inf, "Start conversion source id: $name");
+            Logger::log(severity::Inf, "Source url: '$url'");
             Logger::log(severity::Inf, "Keep source: " . var_export($keep_source, true));
-            Logger::log(severity::Inf, "Manual check: " . var_export($manual_check, true));
+            Logger::log(severity::Inf, "Manual check: " . var_export($manual_check, true) . ' hour(s)');
 
             $perf->setLabel('download_start');
             $res = $this->download();
@@ -668,17 +667,6 @@ class Converter extends SqlWrapper
             }
 
             $perf->setLabel('end_item');
-            $report_download = $perf->getReportItem(PerfCollector::TIME, 'download_start', 'download_end');
-            $report_uncompress = $perf->getReportItem(PerfCollector::TIME, 'uncompress_start', 'uncompress_end');
-            $report_reindex = $perf->getReportItem(PerfCollector::TIME, 'index_start', 'index_end');
-            $report_convert = $perf->getReportItem(PerfCollector::TIME, 'convert_start', 'convert_end');
-            $report_all = $perf->getReportItem(PerfCollector::TIME, 'start_item', 'end_item');
-            Logger::log(severity::Inf, "Download time: $report_download secs");
-            Logger::log(severity::Inf, "Uncompress time: $report_uncompress secs");
-            Logger::log(severity::Inf, "Indexing XMLTV source time: $report_reindex secs");
-            Logger::log(severity::Inf, "Json generation time: $report_convert secs");
-            Logger::log(severity::Inf, "Process conversion time: $report_all secs");
-
             $this->settings[$name]['last_update'] = time();
         } catch(Exception $ex) {
             Logger::log(severity::Err, $ex->getMessage());
@@ -699,12 +687,25 @@ class Converter extends SqlWrapper
                 file_put_contents("$this->working_dir/settings.conf", json_encode($this->settings, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
             }
         }
+
+        $report_download = $perf->getReportItem(PerfCollector::TIME, 'download_start', 'download_end');
+        $report_uncompress = $perf->getReportItem(PerfCollector::TIME, 'uncompress_start', 'uncompress_end');
+        $report_reindex = $perf->getReportItem(PerfCollector::TIME, 'index_start', 'index_end');
+        $report_convert = $perf->getReportItem(PerfCollector::TIME, 'convert_start', 'convert_end');
+        $report_all = $perf->getReportItem(PerfCollector::TIME, 'start_item', 'end_item');
+
+        Logger::log(severity::Inf, "Download time: $report_download secs");
+        Logger::log(severity::Inf, "Uncompressing time: $report_uncompress secs");
+        Logger::log(severity::Inf, "Indexing XMLTV source time: $report_reindex secs");
+        Logger::log(severity::Inf, "Json generation time: $report_convert secs");
+        Logger::log(severity::Inf, "Source conversion time: $report_all secs");
         Logger::log_separator();
     }
 
     public function process(): void
     {
         Logger::log(severity::Inf, 'ProIPTV EPG Converter v1.0');
+        Logger::log(severity::Inf, 'Working directory: ' . $this->working_dir);
 
         if (!file_exists("$this->working_dir/sources.conf")) {
             Logger::log(severity::Err, 'sources.conf file not found');
