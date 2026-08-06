@@ -29,33 +29,46 @@
  * @param string $method
  * @return void
  */
-enum severity : int
-{
-    case Dbg = 0;
-    case Notice = 1;
-    case Inf = 2;
-    case Warn = 3;
-    case Err = 4;
-}
-
 class Logger
 {
-    protected static string $logName = 'default.log';
-    protected static severity $severity = severity::Inf;
+    const Dbg = 0;
+    const Ntc = 1;
+    const Inf = 2;
+    const Wrn = 3;
+    const Err = 4;
 
-    public static function setLogName(string $logName): void
+    protected static string $log_path = 'default.log';
+    protected static int $severity = self::Inf;
+
+    public static function setLogPath(string $log_path): void
     {
-        self::$logName = $logName;
+        self::$log_path = $log_path;
     }
 
-    public static function setSeverity(severity $severity): void
+    public static function setSeverity(string $severity): void
     {
-        self::$severity = $severity;
+        switch (strtolower($severity)) {
+            case 'debug':
+                self::$severity = self::Dbg;
+                break;
+            case 'notice':
+                self::$severity = self::Ntc;
+                break;
+            case 'info':
+                self::$severity = self::Inf;
+                break;
+            case 'warning':
+                self::$severity = self::Wrn;
+                break;
+            case 'error':
+                self::$severity = self::Err;
+                break;
+        }
     }
 
     public static function log_separator(): void
     {
-        $fp = fopen(self::$logName, "a");
+        $fp = fopen(self::$log_path, "a");
         if($fp)
         {
             fwrite($fp, date("[Y.m.d H:i:s] ") . str_repeat('-', 80) . PHP_EOL);
@@ -65,13 +78,13 @@ class Logger
     }
 
     /**
-     * @param severity $severity
+     * @param int $severity
      * @param string $value
      * @return void
      */
-    public static function log(severity $severity, string $value): void
+    public static function log(int $severity, string $value): void
     {
-        if ($severity->value < self::$severity->value) {
+        if ($severity < self::$severity) {
             return;
         }
 
@@ -80,7 +93,7 @@ class Logger
             $value .= PHP_EOL;
         }
 
-        $fp = fopen(self::$logName, "a");
+        $fp = fopen(self::$log_path, "a");
         if($fp)
         {
             fwrite($fp, date("[Y.m.d H:i:s] ") . $value);

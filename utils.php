@@ -91,7 +91,7 @@ function extractGzipFile(string $archive): ?string
 {
     // Check if zlib is enabled
     if (!function_exists('gzopen')) {
-        Logger::log(severity::Err, 'Your PHP has no zlib support enabled.');
+        Logger::log(Logger::Err, 'Your PHP has no zlib support enabled.');
         return null;
     }
 
@@ -108,11 +108,11 @@ function extractGzipFile(string $archive): ?string
 
     // Check if file was extracted.
     if (file_exists($outfile)) {
-        Logger::log(severity::Inf, 'File ungzipped successfully.');
+        Logger::log(Logger::Inf, 'File ungzipped successfully.');
         return $outfile;
     }
 
-    Logger::log(severity::Err, 'Error ungzipping file.');
+    Logger::log(Logger::Err, 'Error ungzipping file.');
     return null;
 }
 
@@ -125,14 +125,14 @@ function extractGzipFile(string $archive): ?string
 function extractZipArchive(string $archive): ?string
 {
     if (!class_exists('ZipArchive')) {
-        Logger::log(severity::Err, 'Your PHP version does not support unzip functionality.');
+        Logger::log(Logger::Err, 'Your PHP version does not support unzip functionality.');
         return null;
     }
 
     $unzip = new ZipArchive;
     // Check if archive is readable.
     if ($unzip->open($archive) !== true) {
-        Logger::log(severity::Err, 'Cannot read .zip archive: ' . $archive);
+        Logger::log(Logger::Err, 'Cannot read .zip archive: ' . $archive);
         return null;
     }
 
@@ -140,14 +140,14 @@ function extractZipArchive(string $archive): ?string
     $first_file = $unzip->getNameIndex(0);
     if (empty($first_file)) {
         $unzip->close();
-        Logger::log(severity::Err, 'Empty zip archive.');
+        Logger::log(Logger::Err, 'Empty zip archive.');
         return null;
     }
 
     $destination = pathinfo($archive, PATHINFO_DIRNAME);
     if (!$unzip->extractTo($destination)) {
         $unzip->close();
-        Logger::log(severity::Err, sprintf('Error unzipping file: %s, status: %s', basename($archive), $unzip->getStatusString()));
+        Logger::log(Logger::Err, sprintf('Error unzipping file: %s, status: %s', basename($archive), $unzip->getStatusString()));
         return null;
     }
 
