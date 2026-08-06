@@ -23,12 +23,12 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
+require_once 'Logger.php';
 require_once 'Converter.php';
 
-/**
- * @return array|false
- */
 ini_set('memory_limit', '256M');
+
+Logger::setSeverity(severity::Dbg);
 
 $converter = new Converter($argv);
 $converter->process();
