@@ -34,6 +34,7 @@ class Converter
 {
     protected static array $http_response_headers;
     protected string $working_dir;
+    private int $download_size = 0;
 
     /**
      * @return array
@@ -94,21 +95,37 @@ class Converter
         $perf_all = new PerfCollector();
         $perf_all->reset('start');
 
+        $total = 0;
+        $success = [];
+        $failed = [];
+        $skipped = [];
         foreach ($config['sources'] as $item) {
-            $this->convert_item($item);
+            $ret = $this->convert_item($item);
+            if ($ret === 0) {
+                $failed[] = $item['id'];
+            } else if ($ret === 1) {
+                $success[] = $item['id'];
+            } else {
+                $skipped[] = $item['id'];
+            }
+            $total++;
         }
 
         $perf_all->setLabel('end');
         $report_all = $perf_all->getReportItem(PerfCollector::TIME, 'start', 'end');
-        Logger::log(Logger::Perm, "Total conversion time: $report_all secs");
+        Logger::log(Logger::Perm, "Total indexed:   " . count($success) . " " . implode(',', $success));
+        Logger::log(Logger::Perm, "Total skipped:   " . count($skipped) . " " . implode(',', $skipped));
+        Logger::log(Logger::Perm, "Total failed:    " . count($failed) . " " . implode(',', $failed));
+        Logger::log(Logger::Perm, "Total processed: " . $total . " (" . convert_bytes($this->download_size) . ")");
+        Logger::log(Logger::Perm, "Total time:      $report_all sec");
         Logger::log_separator();
     }
 
     /**
      * @param array $source_params
-     * @return void
+     * @return int
      */
-    protected function convert_item(array $source_params): void
+    protected function convert_item(array $source_params): int
     {
         $perf = new PerfCollector();
         $perf->reset('start_item');
@@ -116,13 +133,13 @@ class Converter
         $source_id = safe_get_value($source_params, 'id');
         if (empty($source_id)) {
             Logger::log(Logger::Err, 'Empty name not allowed in sources.conf');
-            return;
+            return 0;
         }
 
         $url = safe_get_value($source_params, 'url');
         if (empty($url)) {
             Logger::log(Logger::Err, 'Empty URL not allowed in sources.conf');
-            return;
+            return 0;
         }
 
         $keep_source = safe_get_value($source_params, 'keep_source', false);
@@ -132,6 +149,7 @@ class Converter
 
         $db = new SqlWrapper();
         $db_path = "$this->working_dir/$source_id/$source_id.db";
+        $ret = 0;
         try {
             $json_path = "$this->working_dir/$source_id/epg";
             if (!file_exists($json_path) && !@mkdir($json_path, '0777', true) && !is_dir($json_path)) {
@@ -148,13 +166,13 @@ class Converter
             Logger::log(Logger::Inf, "Manual check: " . var_export($manual_check, true));
 
             $perf->setLabel('download_start');
-            $res = $this->download($db, $url, $xmltv_source, $manual_check);
+            $ret = $this->download($db, $url, $xmltv_source, $manual_check);
             $perf->setLabel('download_end');
-            if ($res === 1) {
+            if ($ret === 0) {
                 throw new Exception("Failed to download file");
             }
 
-            if ($res === 0) {
+            if ($ret === 1) {
                 $perf->setLabel('uncompress_start');
                 $uncompressed = $this->uncompress($xmltv_source);
                 $perf->setLabel('uncompress_end');
@@ -175,10 +193,10 @@ class Converter
                     throw new Exception("Failed to convert to JSON");
                 }
                 $perf->setLabel('convert_end');
+                $db->exec(sprintf("INSERT OR REPLACE INTO epg_params (param, value) VALUES ('last_update', '%d');", time()));
             }
 
             $perf->setLabel('end_item');
-            $db->exec(sprintf("INSERT OR REPLACE INTO epg_params (param, value) VALUES ('last_update', '%d');", time()));
         } catch(Exception $ex) {
             Logger::log(Logger::Err, $ex->getMessage());
         } finally {
@@ -205,10 +223,16 @@ class Converter
         Logger::log(Logger::Inf, "Json generation time: $report_convert secs");
         Logger::log(Logger::Inf, "Source conversion time: $report_all secs");
         Logger::log_separator();
+
+        return $ret;
     }
 
     /**
-     * Return filename that successfully downloaded or false
+     * Check and download file
+     * Return 0 in case of any error
+     * Return 1 in case success download
+     * Return 2 in case file not changed or manual check not performed
+     *
      * @param SqlWrapper $db
      * @param string $url
      * @param string $filename
@@ -222,10 +246,12 @@ class Converter
         Logger::log(Logger::Inf, "Begin download: $url");
 
         $last_check = $db->query_value("SELECT value FROM epg_params WHERE param='last_check';");
-        Logger::log(Logger::Dbg, "Last check: " . date('Y-m-d H:i:s', $last_check));
         if ($manual_check !== false && $last_check !== 0) {
-            if ($last_check + $manual_check * 3600 > time()) {
-                Logger::log(Logger::Err, "Manual download is not expired.");
+            Logger::log(Logger::Dbg, "Last check: " . date('Y-m-d H:i:s', $last_check));
+            $check_time = $last_check + $manual_check * 3600;
+            if ($check_time > time()) {
+                Logger::log(Logger::Err, "Manual download come. Next check: " . date('Y-m-d H:i:s', $check_time));
+                Logger::log_separator();
                 return 2;
             }
         }
@@ -309,20 +335,24 @@ class Converter
                 Logger::log(Logger::Inf, "Server response that file is not changed");
                 $ret = 2;
             } else if (file_exists($tmp_file)) {
+                $download = filesize($tmp_file);
+                $this->download_size += $download;
+
                 Logger::log(Logger::Inf,
-                    sprintf('Save file: HTTP OK (%d, %d bytes) in %.3fs', $http_code, filesize($tmp_file), $execution_tm));
+                    sprintf('Save file: HTTP OK (%d, %d bytes) in %.3fs', $http_code, $download, $execution_tm));
                 Logger::log(Logger::Inf, "Downloaded file saved to: $filename");
+
                 if (file_exists($filename)) {
                     unlink($filename);
                 }
                 rename($tmp_file, $filename);
+                $ret = 1;
             } else {
                 Logger::log(Logger::Err, sprintf('HTTP code (%d) in %.3fs', $http_code, $execution_tm));
                 Logger::log(Logger::Err, "Saved file '$filename' is not exist!");
-                $ret = 1;
             }
 
-            if ($ret !== 1) {
+            if ($ret !== 0) {
                 $new_etag = self::get_response_header('etag');
                 if (!empty($new_etag) && $etag !== $new_etag) {
                     Logger::log(Logger::Dbg, "Save new ETag ($new_etag) for: $url");

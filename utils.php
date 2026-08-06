@@ -84,6 +84,18 @@ function safe_get_value($src, $param, $default = null)
 }
 
 /**
+ * @param int $bytes
+ * @return string
+ */
+function convert_bytes(int $bytes): string
+{
+    $si_prefix = array('B', 'KB', 'MB', 'GB', 'TB');
+    $base = 1024;
+    $class = min((int)log($bytes, $base), count($si_prefix) - 1);
+    return sprintf('%1.2f', $bytes / pow($base, $class)) . ' ' . $si_prefix[$class];
+}
+
+/**
  * @param string $archive
  * @return string|null
  */
