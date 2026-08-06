@@ -28,7 +28,5 @@ require_once 'Converter.php';
 
 ini_set('memory_limit', '256M');
 
-Logger::setSeverity(severity::Dbg);
-
-$converter = new Converter($argv);
-$converter->process();
+$converter = new Converter();
+$converter->process($argv);

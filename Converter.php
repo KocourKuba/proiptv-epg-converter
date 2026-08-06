@@ -34,33 +34,12 @@ class Converter extends SqlWrapper
 {
     protected static array $http_response_headers;
     protected array $config;
-    protected array $settings;
-    protected array $params;
     protected string $working_dir;
-
-    /**
-     * @throws Exception
-     */
-    public function __construct($argv)
-    {
-        list(, $working_dir) = $argv;
-
-        $this->working_dir = empty($working_dir) ? getcwd() : $working_dir;
-        if (str_ends_with($this->working_dir, '/')) {
-            $this->working_dir = trim($this->working_dir, '/');
-        }
-
-        if (!file_exists($this->working_dir) && !@mkdir($this->working_dir, '0777', true) && !is_dir($this->working_dir)) {
-            throw new Exception("Directory '$this->working_dir' can't be created");
-        }
-
-        Logger::setLogName("$this->working_dir/converter.log");
-    }
 
     /**
      * @return array
      */
-    public static function get_response_headers(): array
+    protected static function get_response_headers(): array
     {
         return empty(self::$http_response_headers) ? array() : self::$http_response_headers;
     }
@@ -69,54 +48,34 @@ class Converter extends SqlWrapper
      * @param string $header
      * @return string
      */
-    public static function get_response_header(string $header): string
+    protected static function get_response_header(string $header): string
     {
         return safe_get_value(self::$http_response_headers, $header, '');
     }
 
     /**
-     * @param object $curl
-     * @param string $header
-     * @return int
-     * @noinspection PhpUnused
-     * @noinspection PhpUnusedParameterInspection
-     */
-    public static function http_header_function(object $curl, string $header): int
-    {
-        $len = strlen($header);
-        $header = explode(':', $header, 2);
-        if (count($header) == 2) {
-            $header_name = trim($header[0]);
-            $header_value = trim($header[1]);
-            self::$http_response_headers[strtolower($header_name)] = $header_value;
-        }
-        return $len;
-    }
-
-    /**
      * Return filename that successfully downloaded or false
+     * @param string $url
+     * @param string $filename
+     * @param array $source_info
      * @return int
      */
-    protected function download(): int
+    protected function download(string $url, string $filename, array &$source_info): int
     {
         self::$http_response_headers = array();
 
-        $id = $this->params['id'];
-        $url = $this->params['url'];
-        $manual = $this->params['manual_check'] ?? false;
+        $manual = $this->source_params['manual_check'] ?? false;
         $etag = '';
 
-        Logger::log(severity::Inf, "Begin download: $url");
+        Logger::log(Logger::Inf, "Begin download: $url");
 
-        if ($manual !== false && isset($this->settings[$id]['last_check'])) {
-            $last_check = $this->settings[$id]['last_check'];
+        if ($manual !== false && isset($source_info['last_check'])) {
+            $last_check = $source_info['last_check'];
             if ($last_check + $manual * 3600 > time()) {
-                Logger::log(severity::Err, "Manual download is not expired.");
+                Logger::log(Logger::Err, "Manual download is not expired.");
                 return 2;
             }
         }
-
-        $filename = "$this->working_dir/$id/" . basename($this->params['url']);
 
         $opts[CURLOPT_URL] = $url;
         $opts[CURLOPT_SSL_VERIFYPEER] = 0;
@@ -140,8 +99,8 @@ class Converter extends SqlWrapper
             $opts[CURLOPT_HTTPHEADER][] = "Host: {$parsed_url['host']}";
         }
 
-        if ($manual === false && !empty($this->settings[$id]['etag'])) {
-            $etag = $this->settings[$id]['etag'];
+        if ($manual === false && !empty($source_info['etag'])) {
+            $etag = $source_info['etag'];
             $opts[CURLOPT_HTTPHEADER][] = "If-None-Match: $etag";
         }
 
@@ -153,9 +112,9 @@ class Converter extends SqlWrapper
                 throw new Exception('Curl init failed!');
             }
 
-            Logger::log(severity::Dbg, "Request headers...");
+            Logger::log(Logger::Dbg, "Request headers...");
             foreach ($opts[CURLOPT_HTTPHEADER] as $v) {
-                Logger::log(severity::Dbg, $v);
+                Logger::log(Logger::Dbg, $v);
             }
 
             foreach ($opts as $k => $v) {
@@ -174,9 +133,9 @@ class Converter extends SqlWrapper
                 $fp = null;
             }
 
-            Logger::log(severity::Dbg, "Response headers...");
+            Logger::log(Logger::Dbg, "Response headers...");
             foreach (self::get_response_headers() as $k => $v) {
-                Logger::log(severity::Dbg, "$k: $v");
+                Logger::log(Logger::Dbg, "$k: $v");
             }
 
             if ($http_code < 200 || ($http_code >= 300 && $http_code != 301 && $http_code != 304)) {
@@ -190,30 +149,30 @@ class Converter extends SqlWrapper
 
             $new_etag = self::get_response_header('etag');
             if (!empty($new_etag) && $etag !== $new_etag) {
-                Logger::log(severity::Inf, "Save new ETag ($new_etag) for: $url");
-                $this->settings[$id]['etag'] = $new_etag;
+                Logger::log(Logger::Inf, "Save new ETag ($new_etag) for: $url");
+                $source_info['etag'] = $new_etag;
             }
 
             $ret = 0;
             if ($http_code == 301 || $http_code == 304) {
-                Logger::log(severity::Inf, sprintf('HTTP code (%d) in %.3fs', $http_code, $execution_tm));
-                Logger::log(severity::Inf, "Server response that file is not changed");
+                Logger::log(Logger::Inf, sprintf('HTTP code (%d) in %.3fs', $http_code, $execution_tm));
+                Logger::log(Logger::Inf, "Server response that file is not changed");
                 $ret = 2;
             } else if (file_exists($filename)) {
-                Logger::log(severity::Inf,
+                Logger::log(Logger::Inf,
                     sprintf('Save file: HTTP OK (%d, %d bytes) in %.3fs', $http_code, filesize($filename), $execution_tm));
-                Logger::log(severity::Inf, "Downloaded file saved to: $filename");
+                Logger::log(Logger::Inf, "Downloaded file saved to: $filename");
             } else {
-                Logger::log(severity::Err, sprintf('HTTP code (%d) in %.3fs', $http_code, $execution_tm));
-                Logger::log(severity::Err, "Saved file '$filename' is not exist!");
+                Logger::log(Logger::Err, sprintf('HTTP code (%d) in %.3fs', $http_code, $execution_tm));
+                Logger::log(Logger::Err, "Saved file '$filename' is not exist!");
                 $ret = 1;
             }
 
             if ($ret !== 1) {
-                $this->settings[$id]['last_check'] = time();
+                $source_info['last_check'] = time();
             }
         } catch (Exception $ex) {
-            Logger::log(severity::Err, $ex->getMessage());
+            Logger::log(Logger::Err, $ex->getMessage());
             if (!is_null($fp)) {
                 fclose($fp);
             }
@@ -230,43 +189,67 @@ class Converter extends SqlWrapper
     }
 
     /**
+     * @param object $curl
+     * @param string $header
+     * @return int
+     * @noinspection PhpUnused
+     * @noinspection PhpUnusedParameterInspection
+     */
+    public static function http_header_function(object $curl, string $header): int
+    {
+        $len = strlen($header);
+        $header = explode(':', $header, 2);
+        if (count($header) == 2) {
+            $header_name = trim($header[0]);
+            $header_value = trim($header[1]);
+            self::$http_response_headers[strtolower($header_name)] = $header_value;
+        }
+        return $len;
+    }
+
+    /**
+     * @param string $filename
      * @return string|null
      */
-    public function uncompress(): ?string
+    protected function uncompress(string $filename): ?string
     {
-        $filename = $this->working_dir . '/' . $this->params['id'] . '/' . basename($this->params['url']);
         $handle = fopen($filename, "rb");
         $hdr = fread($handle, 8);
         fclose($handle);
 
         if (0 === mb_strpos($hdr, "\x1f\x8b\x08")) {
-            Logger::log(severity::Dbg, 'GZ signature:  ' . bin2hex(substr($hdr, 0, 3)));
-            Logger::log(severity::Inf, 'Ungzipping: ' . $filename);
+            Logger::log(Logger::Dbg, 'GZ signature:  ' . bin2hex(substr($hdr, 0, 3)));
+            Logger::log(Logger::Inf, 'Ungzipping: ' . $filename);
             $filename = extractGzipFile($filename);
             if (is_null($filename)) {
-                Logger::log(severity::Err, "Failed to unpack $filename");
+                Logger::log(Logger::Err, "Failed to unpack $filename");
             }
         } else if (0 === mb_strpos($hdr, "\x50\x4b\x03\x04")) {
-            Logger::log(severity::Dbg, 'ZIP signature: ' . bin2hex(substr($hdr, 0, 4)));
-            Logger::log(severity::Inf, 'Unzipping: ' . $filename);
+            Logger::log(Logger::Dbg, 'ZIP signature: ' . bin2hex(substr($hdr, 0, 4)));
+            Logger::log(Logger::Inf, 'Unzipping: ' . $filename);
             $filename = extractZipArchive($filename);
             if (is_null($filename)) {
-                Logger::log(severity::Err, "Failed to unpack $filename");
+                Logger::log(Logger::Err, "Failed to unpack $filename");
             }
         } else if (false !== mb_strpos($hdr, "<?xml")) {
-            Logger::log(severity::Dbg, 'XMLT signature:  ' . bin2hex(substr($hdr, 0, 3)));
+            Logger::log(Logger::Dbg, 'XMLT signature:  ' . bin2hex(substr($hdr, 0, 3)));
         } else {
-            Logger::log(severity::Err, 'Unsupported format! For file: ' . $filename);
+            Logger::log(Logger::Err, 'Unsupported format! For file: ' . $filename);
             return null;
         }
 
         return $filename;
     }
 
-    public function indexing(string $filename): bool
+    /**
+     * @param string $name
+     * @param string $filename
+     * @return bool
+     */
+    protected function indexing(string $name, string $filename): bool
     {
         // Reindex channels and picons
-        Logger::log(severity::Inf, "Start indexing $filename");
+        Logger::log(Logger::Inf, "Start indexing $filename");
 
         libxml_use_internal_errors(true);
         $file = false;
@@ -281,7 +264,6 @@ class Converter extends SqlWrapper
                 throw new Exception("Can't open file: $filename");
             }
 
-            $name = $this->params['id'];
             $db_name = "$this->working_dir/$name/$name.db";
             $this->open_db($db_name);
 
@@ -335,10 +317,10 @@ class Converter extends SqlWrapper
 
                 $xml_node = new DOMDocument();
                 if (!$xml_node->loadXML($line, LIBXML_NOWARNING | LIBXML_NOERROR)) {
-                    Logger::log(severity::Err, "Error parsing xml file:\n$line");
+                    Logger::log(Logger::Err, "Error parsing xml file:\n$line");
                     foreach (libxml_get_errors() as $error) {
                         $xml_error = "Error [$error->code] at line $error->line, column $error->column: " . trim($error->message) . "\n";
-                        Logger::log(severity::Err, $xml_error);
+                        Logger::log(Logger::Err, $xml_error);
                     }
                     libxml_clear_errors();
                     continue;
@@ -445,7 +427,7 @@ class Converter extends SqlWrapper
                     $tag_end_pos = $tag_start_pos;
                     $res = $stm->execute();
                     if ($res === false) {
-                        Logger::log(severity::Err, "Error inserting position start: $start_program_block end: $tag_end_pos for channel: $prev_channel");
+                        Logger::log(Logger::Err, "Error inserting position start: $start_program_block end: $tag_end_pos for channel: $prev_channel");
                     }
                     $prev_channel = $channel_id;
                     $start_program_block = $tag_start_pos;
@@ -465,13 +447,13 @@ class Converter extends SqlWrapper
             $total_epg = (int)$this->query_value('SELECT count(DISTINCT channel_id) FROM epg_entries;');
             $total_blocks = (int)$this->query_value('SELECT COUNT(*) FROM epg_entries;');
 
-            Logger::log(severity::Inf, "Total known channels id's: $channels");
-            Logger::log(severity::Inf, "Total channels without information: $cnt");
-            Logger::log(severity::Inf, "Total known picons:  $picons");
-            Logger::log(severity::Inf, "Total unique epg id's indexed: $total_epg, total blocks: $total_blocks");
+            Logger::log(Logger::Inf, "Total known channels id's: $channels");
+            Logger::log(Logger::Inf, "Total channels without information: $cnt");
+            Logger::log(Logger::Inf, "Total known picons:  $picons");
+            Logger::log(Logger::Inf, "Total unique epg id's indexed: $total_epg, total blocks: $total_blocks");
             $ret = true;
         } catch (Exception $ex) {
-            Logger::log(severity::Err, $ex->getMessage());
+            Logger::log(Logger::Err, $ex->getMessage());
         } finally {
             fclose($file);
         }
@@ -486,10 +468,10 @@ class Converter extends SqlWrapper
      */
     protected function db2json(string $path, string $filename): bool
     {
-        Logger::log(severity::Inf, 'Start JSON conversion...');
+        Logger::log(Logger::Inf, 'Start JSON conversion...');
 
         if (!file_exists($path)) {
-            Logger::log(severity::Err, "File $path does not exist");
+            Logger::log(Logger::Err, "File $path does not exist");
             return false;
         }
 
@@ -509,7 +491,7 @@ class Converter extends SqlWrapper
 
         $file = fopen($filename, 'rb');
         if ($file === false) {
-            Logger::log(severity::Err, "File $path can't be opened");
+            Logger::log(Logger::Err, "File $path can't be opened");
             return false;
         }
 
@@ -522,7 +504,7 @@ class Converter extends SqlWrapper
             $query = sprintf('SELECT start, end FROM epg_entries WHERE channel_id = %s;', SqlWrapper::sql_quote($channel_id));
             $channel_positions = $this->fetch_array($query);
             if (empty($channel_positions)) {
-                Logger::log(severity::Dbg, "No positions for channel: $channel_id");
+                Logger::log(Logger::Dbg, "No positions for channel: $channel_id");
                 continue;
             }
 
@@ -531,7 +513,7 @@ class Converter extends SqlWrapper
                 fseek($file, $pos['start']);
                 $length = $pos['end'] - $pos['start'];
                 if ($length <= 0) {
-                    Logger::log(severity::Dbg, "Mismatch start '{$pos['start']}' and end '{$pos['end']}' positions for $channel_id");
+                    Logger::log(Logger::Dbg, "Mismatch start '{$pos['start']}' and end '{$pos['end']}' positions for $channel_id");
                     continue;
                 }
 
@@ -540,7 +522,7 @@ class Converter extends SqlWrapper
                 $xml_node = new DOMDocument();
                 $res = $xml_node->loadXML($xml_str);
                 if ($res === false) {
-                    Logger::log(severity::Err, "Exception in line:\n$xml_str");
+                    Logger::log(Logger::Err, "Exception in line:\n$xml_str");
                     continue;
                 }
 
@@ -596,48 +578,59 @@ class Converter extends SqlWrapper
         }
 
         fclose($file);
-        Logger::log(severity::Inf, "Json files generated: $total from: $stored existing");
+        Logger::log(Logger::Inf, "Json files generated: $total from: $stored existing");
         Logger::log_separator();
 
         return true;
     }
 
-    protected function convert_item(): void
+    /**
+     * @param array $source_params
+     * @return void
+     */
+    protected function convert_item(array $source_params): void
     {
         $perf = new PerfCollector();
         $perf->reset('start_item');
 
-        $name = safe_get_value($this->params, 'id');
-        if (empty($name)) {
-            Logger::log(severity::Err, 'Empty name not allowed in sources.conf');
+        $id = safe_get_value($source_params, 'id');
+        if (empty($id)) {
+            Logger::log(Logger::Err, 'Empty name not allowed in sources.conf');
             return;
         }
 
-        $url = safe_get_value($this->params, 'url');
+        $url = safe_get_value($source_params, 'url');
         if (empty($url)) {
-            Logger::log(severity::Err, 'Empty URL not allowed in sources.conf');
+            Logger::log(Logger::Err, 'Empty URL not allowed in sources.conf');
             return;
         }
 
-        $keep_source = safe_get_value($this->params, 'keep_source', false);
-        $manual_check = safe_get_value($this->params, 'manual_check', false);
+        $keep_source = safe_get_value($source_params, 'keep_source', false);
+        $manual_check = safe_get_value($source_params, 'manual_check', false);
 
-        $xmltv_source = $this->working_dir . '/' . $this->params['id'] . '/' . basename($url);
+        $xmltv_source = "$this->working_dir/$id/" . basename($url);
+
+        $params_filename = "$this->working_dir/$id/source.data";
+        if (file_exists($params_filename)) {
+            $source_info = json_decode(file_get_contents($params_filename), true);
+        } else {
+            $source_info = array();
+        }
 
         try {
-            $path = "$this->working_dir/$name/epg";
+            $path = "$this->working_dir/$id/epg";
             if (!file_exists($path) && !@mkdir($path, '0777', true) && !is_dir($path)) {
                 throw new Exception("Directory '$path' can't be created");
             }
 
             Logger::log_separator();
-            Logger::log(severity::Inf, "Start conversion source id: $name");
-            Logger::log(severity::Inf, "Source url: '$url'");
-            Logger::log(severity::Inf, "Keep source: " . var_export($keep_source, true));
-            Logger::log(severity::Inf, "Manual check: " . var_export($manual_check, true) . ' hour(s)');
+            Logger::log(Logger::Inf, "Start conversion source id: $id");
+            Logger::log(Logger::Inf, "Source url: '$url'");
+            Logger::log(Logger::Inf, "Keep source: " . var_export($keep_source, true));
+            Logger::log(Logger::Inf, "Manual check: " . var_export($manual_check, true) . ' hour(s)');
 
             $perf->setLabel('download_start');
-            $res = $this->download();
+            $res = $this->download($url, $xmltv_source, $source_info);
             $perf->setLabel('download_end');
             if ($res === 1) {
                 throw new Exception("Failed to download file");
@@ -645,14 +638,14 @@ class Converter extends SqlWrapper
 
             if ($res === 0) {
                 $perf->setLabel('uncompress_start');
-                $uncompressed = $this->uncompress();
+                $uncompressed = $this->uncompress($xmltv_source);
                 $perf->setLabel('uncompress_end');
                 if (is_null($uncompressed)) {
                     throw new Exception("Failed to uncompress file.");
                 }
 
                 $perf->setLabel('index_start');
-                $res = $this->indexing($uncompressed);
+                $res = $this->indexing($id, $uncompressed);
                 $perf->setLabel('index_end');
                 if ($res === false) {
                     throw new Exception("Failed to indexing XMLTV");
@@ -667,24 +660,25 @@ class Converter extends SqlWrapper
             }
 
             $perf->setLabel('end_item');
-            $this->settings[$name]['last_update'] = time();
+            $source_info['last_update'] = time();
         } catch(Exception $ex) {
-            Logger::log(severity::Err, $ex->getMessage());
-            unset($this->settings[$name]);
+            Logger::log(Logger::Err, $ex->getMessage());
+            $source_info = array();
+            unlink($params_filename);
         } finally {
-            $keep_source = safe_get_value($this->params, 'keep_source', false);
+            $keep_source = safe_get_value($source_params, 'keep_source', false);
             if (!$keep_source && file_exists($xmltv_source)) {
-                Logger::log(severity::Dbg, "Remove source file: $xmltv_source");
+                Logger::log(Logger::Dbg, "Remove source file: $xmltv_source");
                 unlink($xmltv_source);
             }
 
             if (!empty($uncompressed) && $xmltv_source !== $uncompressed) {
-                Logger::log(severity::Dbg, "Remove uncompressed file: $uncompressed");
+                Logger::log(Logger::Dbg, "Remove uncompressed file: $uncompressed");
                 unlink($uncompressed);
             }
 
-            if (!empty($this->settings)) {
-                file_put_contents("$this->working_dir/settings.conf", json_encode($this->settings, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+            if (!empty($source_info)) {
+                file_put_contents($params_filename, json_encode($source_info, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
             }
         }
 
@@ -694,46 +688,61 @@ class Converter extends SqlWrapper
         $report_convert = $perf->getReportItem(PerfCollector::TIME, 'convert_start', 'convert_end');
         $report_all = $perf->getReportItem(PerfCollector::TIME, 'start_item', 'end_item');
 
-        Logger::log(severity::Inf, "Download time: $report_download secs");
-        Logger::log(severity::Inf, "Uncompressing time: $report_uncompress secs");
-        Logger::log(severity::Inf, "Indexing XMLTV source time: $report_reindex secs");
-        Logger::log(severity::Inf, "Json generation time: $report_convert secs");
-        Logger::log(severity::Inf, "Source conversion time: $report_all secs");
+        Logger::log(Logger::Inf, "Download time: $report_download secs");
+        Logger::log(Logger::Inf, "Uncompressing time: $report_uncompress secs");
+        Logger::log(Logger::Inf, "Indexing XMLTV source time: $report_reindex secs");
+        Logger::log(Logger::Inf, "Json generation time: $report_convert secs");
+        Logger::log(Logger::Inf, "Source conversion time: $report_all secs");
         Logger::log_separator();
     }
 
-    public function process(): void
+    /**
+     * @param array $argv
+     * @return void
+     */
+    public function process(array $argv): void
     {
-        Logger::log(severity::Inf, 'ProIPTV EPG Converter v1.0');
-        Logger::log(severity::Inf, 'Working directory: ' . $this->working_dir);
+        list(, $config) = $argv;
 
-        if (!file_exists("$this->working_dir/sources.conf")) {
-            Logger::log(severity::Err, 'sources.conf file not found');
-            die();
+        if (empty($config)) {
+            echo "Empty configuration file!";
+            return;
         }
-        $this->config = json_decode(file_get_contents("$this->working_dir/sources.conf"), true);
 
-        if (file_exists("$this->working_dir/settings.conf")) {
-            $this->settings = json_decode(file_get_contents("$this->working_dir/settings.conf"), true);
+        if (!file_exists($config)) {
+            echo "configuration file '$config' not found!";
+            return;
+        }
+
+        $this->working_dir = pathinfo($config, PATHINFO_DIRNAME);
+        $this->config = json_decode(file_get_contents($config), true);
+        if (isset($this->config['log_level'])) {
+            Logger::setSeverity($this->config['log_level']);
+        }
+
+        if (isset($this->config['log_name'])) {
+            Logger::setLogPath($this->config['log_name']);
         } else {
-            $this->settings = array();
+            Logger::setLogPath("$this->working_dir/converter.log");
         }
 
-        if (empty($this->config)) {
-            Logger::log(severity::Err, 'Empty sources.conf configuration');
+        Logger::log(Logger::Inf, 'ProIPTV EPG Converter v1.0');
+        Logger::log(Logger::Inf, 'Working directory: ' . $this->working_dir);
+
+        if (!isset($this->config['sources']) || empty($this->config['sources'])) {
+            Logger::log(Logger::Err, 'Empty sources configuration');
             return;
         }
 
         $perf_all = new PerfCollector();
         $perf_all->reset('start');
 
-        foreach ($this->config as $item) {
-            $this->params = $item;
-            $this->convert_item();
+        foreach ($this->config['sources'] as $item) {
+            $this->convert_item($item);
         }
 
         $perf_all->setLabel('end');
         $report_all = $perf_all->getReportItem(PerfCollector::TIME, 'start', 'end');
-        Logger::log(severity::Inf, "Total conversion time: $report_all secs");
+        Logger::log(Logger::Inf, "Total conversion time: $report_all secs");
     }
 }

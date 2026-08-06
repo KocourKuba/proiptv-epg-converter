@@ -37,7 +37,7 @@ class Logger
     const Wrn = 3;
     const Err = 4;
 
-    protected static string $log_path = 'default.log';
+    protected static string $log_path = 'converter.log';
     protected static int $severity = self::Inf;
 
     public static function setLogPath(string $log_path): void
