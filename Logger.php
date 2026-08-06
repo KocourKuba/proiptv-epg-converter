@@ -36,6 +36,7 @@ class Logger
     const Inf = 2;
     const Wrn = 3;
     const Err = 4;
+    const Perm = 5;
 
     protected static string $log_path = 'converter.log';
     protected static int $severity = self::Inf;
@@ -66,15 +67,9 @@ class Logger
         }
     }
 
-    public static function log_separator(): void
+    public static function log_separator(int $severity = Logger::Inf): void
     {
-        $fp = fopen(self::$log_path, "a");
-        if($fp)
-        {
-            fwrite($fp, date("[Y.m.d H:i:s] ") . str_repeat('-', 80) . PHP_EOL);
-            fclose($fp);
-        }
-
+        self::log($severity, str_repeat('-', 80));
     }
 
     /**
@@ -88,14 +83,12 @@ class Logger
             return;
         }
 
-        if (!str_ends_with($value, PHP_EOL))
-        {
+        if (substr($value, -1, 1) !== PHP_EOL) {
             $value .= PHP_EOL;
         }
 
         $fp = fopen(self::$log_path, "a");
-        if($fp)
-        {
+        if ($fp) {
             fwrite($fp, date("[Y.m.d H:i:s] ") . $value);
             fclose($fp);
         }

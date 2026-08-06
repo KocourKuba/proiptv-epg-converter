@@ -44,7 +44,7 @@ class PerfCollector
     /**
      * @var array
      */
-    private array $labels = array();
+    private array $labels = [];
 
     /**
      * Clear all labels
@@ -52,7 +52,7 @@ class PerfCollector
      */
     public function reset(string $firstLabel = ''): void
     {
-        $this->labels = array();
+        $this->labels = [];
         if (!empty($firstLabel)) {
             $this->setLabel($firstLabel);
         }
@@ -80,18 +80,10 @@ class PerfCollector
     }
 
     /**
-     * Get the labels count
-     * @return int
-     */
-    public function getLabelsCount(): int
-    {
-        return count($this->labels);
-    }
-
-    /**
      * Obtain a memory limit set in php.ini
+     * @return string
      */
-    public static function getMemoryLimit(): false|string
+    public static function getMemoryLimit(): string
     {
         return ini_get('memory_limit');
     }
@@ -105,10 +97,10 @@ class PerfCollector
      * @param false|string $endLabel End label
      * @return mixed
      */
-    public function getReportItem(string $item, false|string $startLabel = false, false|string $endLabel = false): mixed
+    public function getReportItem(string $item, $startLabel = false, $endLabel = false)
     {
         if (empty($this->labels)) {
-            return array();
+            return [];
         }
 
         $report = $this->getFullReport($startLabel, $endLabel);
@@ -122,7 +114,7 @@ class PerfCollector
      * @param false|string $endLabel End label
      * @return array
      */
-    public function getFullReport(bool|string $startLabel = false, false|string $endLabel = false): array
+    public function getFullReport($startLabel = false, $endLabel = false): array
     {
         if ($startLabel === false) {
             reset($this->labels);
@@ -134,7 +126,7 @@ class PerfCollector
         }
 
         if (!isset($this->labels[$startLabel]) || !isset($this->labels[$endLabel])) {
-            return array();
+            return [];
         }
 
         $time = $this->labels[$endLabel][self::STAT_TIME] - $this->labels[$startLabel][self::STAT_TIME];

@@ -31,7 +31,7 @@
  */
 function is_proto_http(string $url): bool
 {
-    return str_starts_with($url, 'http://') || str_starts_with($url, 'https://');
+    return strpos($url, 'http://') === 0 || strpos($url, 'https://') === 0;
 }
 
 /**
@@ -42,7 +42,7 @@ function is_proto_http(string $url): bool
  * @param mixed $default
  * @return mixed
  */
-function safe_get_value(object|array $src, array|string $param, mixed $default = null): mixed
+function safe_get_value($src, $param, $default = null)
 {
     // No key to resolve. Null key or empty string is not allowed
     if (empty($param)) {
@@ -180,7 +180,7 @@ function get_node_value(DOMElement $node, string $name): string
  */
 function get_node_values(DOMElement $node, string $name): array
 {
-    $values = array();
+    $values = [];
     foreach ($node->getElementsByTagName($name) as $element) {
         if (!empty($element->nodeValue)) {
             $values[] = $element->nodeValue;

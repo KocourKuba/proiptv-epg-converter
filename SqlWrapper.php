@@ -33,18 +33,11 @@ class SqlWrapper
     protected SQLite3 $db;
 
     /**
-     * @var string
-     */
-    protected string $db_path = '';
-
-    /**
      * @param string $db_path
      * @return void
      */
     public function open_db(string $db_path): void
     {
-        $this->db_path = $db_path;
-
         $this->db = new SQLite3($db_path, SQLITE3_OPEN_READWRITE | SQLITE3_OPEN_CREATE, '');
         $this->db->exec('PRAGMA journal_mode=MEMORY;');
     }
@@ -85,7 +78,7 @@ class SqlWrapper
      * @param string $query
      * @return SQLite3Stmt|false
      */
-    public function prepare(string $query): false|SQLite3Stmt
+    public function prepare(string $query): SQLite3Stmt
     {
         return $this->db->prepare($query);
     }
@@ -100,7 +93,7 @@ class SqlWrapper
      * @param bool $full_row
      * @return mixed
      */
-    public function query_value(string $query, bool $full_row = false): mixed
+    public function query_value(string $query, bool $full_row = false)
     {
         if (empty($query)) {
             return false;
@@ -124,10 +117,10 @@ class SqlWrapper
     public function fetch_array(string $query, string $column = null): array
     {
         if (empty($query)) {
-            return array();
+            return [];
         }
 
-        $rows = array();
+        $rows = [];
         $result = $this->db->query($query);
         if ($result) {
             while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
@@ -153,7 +146,7 @@ class SqlWrapper
             return false;
         }
 
-        $query = 'BEGIN;' . $query . 'COMMIT;' ;
+        $query = 'BEGIN;' . $query . 'COMMIT;';
         if ($this->db->exec($query)) {
             return true;
         }
