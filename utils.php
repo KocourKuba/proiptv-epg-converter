@@ -23,6 +23,20 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
+function create_path($path): bool
+{
+    return (is_dir($path) || (mkdir($path, '0777', true) && is_dir($path)));
+}
+
+/**
+ * @param string $path
+ * @return string
+ */
+function paved_path(string $path): string
+{
+    return substr($path, -1, 1) == '/' ? substr($path, 0, -1) : $path;
+}
+
 /**
  * Check if url has http?:// scheme
  *

@@ -32,6 +32,12 @@ global $logger;
 
 class Converter
 {
+    const CONFIG = 'config_file';
+    const RUN = 'run';
+    const LOGFILE = 'log_file';
+    const WORKDIR = 'work_dir';
+    const SEVERITY = 'severity';
+
     protected static array $http_response_headers;
     protected string $working_dir;
     private int $download_size = 0;
@@ -54,40 +60,45 @@ class Converter
     }
 
     /**
-     * @param array $argv
+     * @param array $converter_config
      * @return void
      */
-    public function process(array $argv): void
+    public function process(array $converter_config): void
     {
-        list(, $config_file) = $argv;
-
-        if (empty($config_file)) {
-            echo "Empty configuration file!";
-            return;
-        }
-
+        $config_file = $converter_config[self::CONFIG];
         if (!file_exists($config_file)) {
-            echo "configuration file '$config_file' not found!";
+            echo "Error! Configuration file '$config_file' not found!";
             return;
         }
 
-        $this->working_dir = pathinfo($config_file, PATHINFO_DIRNAME);
-        $config = json_decode(file_get_contents($config_file), true);
-        if (isset($config['log_path'])) {
-            Logger::setLogPath($config['log_path']);
+        if (empty($converter_config[self::WORKDIR])) {
+            $this->working_dir = pathinfo($converter_config[self::CONFIG], PATHINFO_DIRNAME);
         } else {
-            Logger::setLogPath("$this->working_dir/converter.log");
+            $this->working_dir = paved_path($converter_config[self::WORKDIR]);
         }
 
-        Logger::log(Logger::Perm, 'ProIPTV EPG Converter v1.1');
+        if (!create_path($this->working_dir)) {
+            echo "Error: Can't create directory '$this->working_dir'!";
+            return;
+        }
+
+        if (!empty($converter_config[self::SEVERITY])) {
+            Logger::setSeverity($converter_config[self::SEVERITY]);
+        }
+
+        if (empty($converter_config[self::LOGFILE])) {
+            Logger::setLogPath("$this->working_dir/converter.log");
+        } else {
+            create_path(pathinfo($converter_config[self::LOGFILE], PATHINFO_DIRNAME));
+            Logger::setLogPath($converter_config[self::LOGFILE]);
+        }
+
+        $sources = json_decode(file_get_contents($config_file), true);
+
+        Logger::log(Logger::Perm, 'ProIPTV EPG Converter v1.2');
         Logger::log(Logger::Perm, 'Working directory: ' . $this->working_dir);
 
-        if (isset($config['log_level'])) {
-            Logger::setSeverity($config['log_level']);
-            Logger::log(Logger::Perm, 'Log level set to: ' . $config['log_level']);
-        }
-
-        if (empty($config['sources'])) {
+        if (empty($sources)) {
             Logger::log(Logger::Err, 'Empty sources configuration');
             return;
         }
@@ -95,11 +106,16 @@ class Converter
         $perf_all = new PerfCollector();
         $perf_all->reset('start');
 
-        $total = 0;
+        if (!empty($converter_config[self::RUN])) {
+            Logger::log(Logger::Inf, 'Run only: ' . implode(',',$converter_config[self::RUN]));
+        }
+
         $success = [];
         $failed = [];
         $skipped = [];
-        foreach ($config['sources'] as $item) {
+        foreach ($sources as $item) {
+            if (!empty($converter_config[self::RUN] && !in_array($item['id'], $converter_config[self::RUN]))) continue;
+
             $ret = $this->convert_item($item);
             if ($ret === 0) {
                 $failed[] = $item['id'];
@@ -108,16 +124,16 @@ class Converter
             } else {
                 $skipped[] = $item['id'];
             }
-            $total++;
         }
 
         $perf_all->setLabel('end');
         $report_all = $perf_all->getReportItem(PerfCollector::TIME, 'start', 'end');
-        Logger::log(Logger::Perm, "Total indexed:   " . count($success) . " " . implode(',', $success));
-        Logger::log(Logger::Perm, "Total skipped:   " . count($skipped) . " " . implode(',', $skipped));
-        Logger::log(Logger::Perm, "Total failed:    " . count($failed) . " " . implode(',', $failed));
-        Logger::log(Logger::Perm, "Total processed: " . $total . " (" . convert_bytes($this->download_size) . ")");
-        Logger::log(Logger::Perm, "Total time:      $report_all sec");
+
+        Logger::log(Logger::Perm, "Total downloaded: " . convert_bytes($this->download_size));
+        Logger::log(Logger::Perm, "Total converted:  " . count($success) . " " . implode(',', $success));
+        Logger::log(Logger::Perm, "Total skipped:    " . count($skipped) . " " . implode(',', $skipped));
+        Logger::log(Logger::Perm, "Total failed:     " . count($failed) . " " . implode(',', $failed));
+        Logger::log(Logger::Perm, "Total time:       $report_all sec");
         Logger::log_separator();
     }
 
@@ -144,6 +160,7 @@ class Converter
 
         $keep_source = safe_get_value($source_params, 'keep_source', false);
         $manual_check = safe_get_value($source_params, 'manual_check', false);
+        $purge_stalled = safe_get_value($source_params, 'purge_stalled', 7);
 
         $xmltv_source = "$this->working_dir/$source_id/" . basename($url);
 
@@ -152,7 +169,7 @@ class Converter
         $ret = 0;
         try {
             $json_path = "$this->working_dir/$source_id/epg";
-            if (!file_exists($json_path) && !@mkdir($json_path, '0777', true) && !is_dir($json_path)) {
+            if (!create_path($json_path)) {
                 throw new Exception("Directory '$json_path' can't be created");
             }
 
@@ -193,7 +210,13 @@ class Converter
                     throw new Exception("Failed to convert to JSON");
                 }
                 $perf->setLabel('convert_end');
-                $db->exec(sprintf("INSERT OR REPLACE INTO epg_params (param, value) VALUES ('last_update', '%d');", time()));
+
+                $perf->setLabel('purge_start');
+                $purged = $this->purge_stalled($db, $json_path, $purge_stalled);
+                if (!empty($purged)) {
+                    Logger::log(Logger::Inf, "Purge files: " . implode(',', $purged));
+                }
+                $perf->setLabel('purge_end');
             }
 
             $perf->setLabel('end_item');
@@ -781,5 +804,46 @@ class Converter
         Logger::log_separator();
 
         return true;
+    }
+
+    /**
+     * @param SqlWrapper $db
+     * @param string $json_path
+     * @param int $max_days
+     * @return array
+     */
+    protected function purge_stalled(SqlWrapper $db, string $json_path, int $max_days): array
+    {
+        if ($max_days === -1) {
+            return [];
+        }
+        $db->exec(sprintf("INSERT OR REPLACE INTO epg_params (param, value) VALUES ('last_update', '%d');", time()));
+        $known_channels = $db->fetch_array('SELECT DISTINCT channel_id from epg_channels;', 'channel_id');
+
+        $known_channels = array_map(function ($channel_id) {
+            return str_replace('/', '%2F', $channel_id) . '.json';
+        }, $known_channels);
+
+        $files = [];
+        foreach (glob("$json_path/*.json") as $file) {
+            $files[] = pathinfo($file, PATHINFO_BASENAME);
+        }
+
+        $stalled = array_diff($files, $known_channels);
+        $purged = [];
+        if (!empty($stalled)) {
+            Logger::log(Logger::Dbg, "Stalled files: " . json_encode($stalled));
+            $now = time();
+            array_map(function ($filename) use ($json_path, $now, $max_days, &$purged) {
+                $filepath = $json_path . '/' . $filename;
+                $mtime = filemtime($filepath);
+                if ($mtime + $max_days * 86400 < $now) {
+                    $purged[] = $filepath;
+                    unlink($filepath);
+                }
+            }, $stalled);
+        }
+
+        return $purged;
     }
 }
