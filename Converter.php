@@ -273,7 +273,7 @@ class Converter
             Logger::log(Logger::Dbg, "Last check: " . date('Y-m-d H:i:s', $last_check));
             $check_time = $last_check + $manual_check * 3600;
             if ($check_time > time()) {
-                Logger::log(Logger::Err, "Manual download come. Next check: " . date('Y-m-d H:i:s', $check_time));
+                Logger::log(Logger::Inf, "Up to date. Expired at: " . date('Y-m-d H:i:s', $check_time));
                 Logger::log_separator();
                 return 2;
             }
@@ -430,6 +430,10 @@ class Converter
      */
     protected function uncompress(string $filename): ?string
     {
+        if (!file_exists($filename)) {
+            Logger::log(Logger::Err, "File not exist: $filename");
+        }
+
         $handle = fopen($filename, "rb");
         $hdr = fread($handle, 8);
         fclose($handle);
