@@ -36,6 +36,7 @@ class Converter
     const RUN = 'run';
     const LOGFILE = 'log_file';
     const WORKDIR = 'work_dir';
+    const FORCE = 'force';
     const SEVERITY = 'severity';
 
     protected static array $http_response_headers;
@@ -106,6 +107,9 @@ class Converter
         $perf_all = new PerfCollector();
         $perf_all->reset('start');
 
+        $force_processing = isset($converter_config[self::FORCE]) ?? false;
+        Logger::log(Logger::Inf, 'Force procesing: ' . var_export($force_processing, true));
+
         if (!empty($converter_config[self::RUN])) {
             Logger::log(Logger::Inf, 'Run only: ' . implode(',',$converter_config[self::RUN]));
         }
@@ -116,7 +120,7 @@ class Converter
         foreach ($sources as $item) {
             if (!empty($converter_config[self::RUN] && !in_array($item['id'], $converter_config[self::RUN]))) continue;
 
-            $ret = $this->convert_item($item);
+            $ret = $this->convert_item($item, $force_processing);
             if ($ret === 0) {
                 $failed[] = $item['id'];
             } else if ($ret === 1) {
@@ -139,9 +143,10 @@ class Converter
 
     /**
      * @param array $source_params
+     * @param bool $force_processing
      * @return int
      */
-    protected function convert_item(array $source_params): int
+    protected function convert_item(array $source_params, bool $force_processing): int
     {
         $perf = new PerfCollector();
         $perf->reset('start_item');
@@ -183,7 +188,7 @@ class Converter
             Logger::log(Logger::Inf, "Manual check: " . var_export($manual_check, true));
 
             $perf->setLabel('download_start');
-            $ret = $this->download($db, $url, $xmltv_source, $manual_check);
+            $ret = $this->download($db, $url, $xmltv_source, $manual_check, $force_processing);
             $perf->setLabel('download_end');
             if ($ret === 0) {
                 throw new Exception("Failed to download file");
@@ -217,6 +222,8 @@ class Converter
                     Logger::log(Logger::Inf, "Purge files: " . implode(',', $purged));
                 }
                 $perf->setLabel('purge_end');
+
+                $this->save_channels_info($db, $json_path);
             }
 
             $perf->setLabel('end_item');
@@ -260,16 +267,17 @@ class Converter
      * @param string $url
      * @param string $filename
      * @param int|false $manual_check
+     * @param bool $force_processing
      * @return int
      */
-    protected function download(SqlWrapper $db, string $url, string $filename, int $manual_check): int
+    protected function download(SqlWrapper $db, string $url, string $filename, int $manual_check, bool $force_processing): int
     {
         self::$http_response_headers = [];
 
         Logger::log(Logger::Inf, "Begin download: $url");
 
         $last_check = $db->query_value("SELECT value FROM epg_params WHERE param='last_check';");
-        if ($manual_check !== false && $last_check !== 0) {
+        if (!$force_processing && $manual_check !== false && $last_check !== 0) {
             Logger::log(Logger::Dbg, "Last check: " . date('Y-m-d H:i:s', $last_check));
             $check_time = $last_check + $manual_check * 3600;
             if ($check_time > time()) {
@@ -305,7 +313,7 @@ class Converter
             $opts[CURLOPT_HTTPHEADER][] = "Host: {$parsed_url['host']}";
         }
 
-        if (!$manual_check && !empty($etag)) {
+        if (!$force_processing && !$manual_check && !empty($etag)) {
             $opts[CURLOPT_HTTPHEADER][] = "If-None-Match: $etag";
         }
 
@@ -487,7 +495,7 @@ class Converter
 
             $query = 'DROP TABLE IF EXISTS epg_channels;';
             $query .= 'DROP TABLE IF EXISTS epg_picons;';
-            $query .= 'CREATE TABLE epg_channels (alias TEXT PRIMARY KEY not null, channel_id TEXT not null, picon_hash TEXT);';
+            $query .= 'CREATE TABLE epg_channels (alias TEXT PRIMARY KEY NOT NULL, alias_orig TEXT NOT NULL, channel_id TEXT NOT NULL, picon_hash TEXT);';
             $query .= 'CREATE TABLE epg_picons (picon_hash TEXT PRIMARY KEY not null, picon_url TEXT);';
             $res = $db->exec_transaction($query);
             if (!$res) {
@@ -565,13 +573,15 @@ class Converter
 
                 $q_picon_hash = SqlWrapper::sql_quote($picon_hash);
                 $q_alias = SqlWrapper::sql_quote(mb_convert_case($channel_id, MB_CASE_LOWER, "UTF-8"));
-                $query .= sprintf('INSERT OR IGNORE INTO epg_channels (alias,channel_id,picon_hash) VALUES(%s,%s,%s);',
-                    $q_alias, $q_channel_id, $q_picon_hash);
+                $q_alias_orig = SqlWrapper::sql_quote($channel_id);
+                $query .= sprintf('INSERT OR IGNORE INTO epg_channels (alias,alias_orig,channel_id,picon_hash) VALUES (%s,%s,%s,%s);',
+                    $q_alias, $q_alias_orig, $q_channel_id, $q_picon_hash);
 
                 foreach ($xml_node->getElementsByTagName('display-name') as $tag) {
                     $q_alias = SqlWrapper::sql_quote(mb_convert_case($tag->nodeValue, MB_CASE_LOWER, "UTF-8"));
-                    $query .= sprintf('INSERT OR IGNORE INTO epg_channels (alias,channel_id,picon_hash) VALUES(%s,%s,%s);',
-                        $q_alias, $q_channel_id, $q_picon_hash);
+                    $q_alias_orig = SqlWrapper::sql_quote($tag->nodeValue);
+                    $query .= sprintf('INSERT OR IGNORE INTO epg_channels (alias,alias_orig,channel_id,picon_hash) VALUES (%s,%s,%s,%s);',
+                        $q_alias, $q_alias_orig, $q_channel_id, $q_picon_hash);
                 }
             }
             $db->exec_transaction($query);
@@ -833,7 +843,7 @@ class Converter
             $files[] = pathinfo($file, PATHINFO_BASENAME);
         }
 
-        $stalled = array_diff($files, $known_channels);
+        $stalled = array_diff($files, $known_channels, array('channels_info.json'));
         $purged = [];
         if (!empty($stalled)) {
             Logger::log(Logger::Dbg, "Stalled files: " . json_encode($stalled));
@@ -849,5 +859,15 @@ class Converter
         }
 
         return $purged;
+    }
+
+    protected function save_channels_info(SqlWrapper $db, string $json_path): void
+    {
+        $info['epg_id'] = $db->fetch_array('SELECT DISTINCT channel_id from epg_channels order by channel_id;', 'channel_id');
+        $aliases = $db->fetch_array('SELECT alias, channel_id from epg_channels WHERE alias_orig != channel_id ORDER BY alias;');
+        foreach ($aliases as $channel) {
+            $info['epg_aliases'][$channel['alias']] = $channel['channel_id'];
+        }
+        file_put_contents("$json_path/channels_info.json", json_encode($info, JSON_UNESCAPED_UNICODE));
     }
 }

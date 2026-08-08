@@ -16,14 +16,15 @@ PHP CLI 7.4 or higher. PHP must be built with XML, zlib and sqlite3 support.
 ### Command line arguments
 
 ```
-    -c, --config=[file],       Path to configuration file
-    -r, --run=[id],            Id to be processed
+    -c, --config=[file],       Path to configuration file.
+    -r, --run=[id],            Id to be processed.
     -r, --run="id1 id2 id3",   List of id's to be processed.
                                If omitted all sources from configuration file will processed.
     -t, --target=[dir],        Directory were epg files for sources  will be stored.
                                If omitted log created in the same directory as configuration file.
-    -l, --log=[log path],      Path to log file. If omitted log created in the same directory as configuration file"
-    -d, --debug=[level],       Log level [error, warning, info, notice, debug]. Default is 'info'
+    -f, --force,               Force processing."
+    -l, --log=[log path],      Path to log file. If omitted log created in the same directory as configuration file."
+    -s, --severity=[level],    Log level [error, warning, info, notice, debug]. Default is 'info'.
 ```
 
 <details>
@@ -70,12 +71,13 @@ PHP CLI 7.4 или выше. PHP должен быть собран с подд�
 ```
     -c, --config=[file],       Путь к конфигурационному файлу. Обязательный параметр!
     -r, --run=[id],            Id источника для обработки.
-    -r, --run="id1 id2 id3",   Возможно задать несколько источников для обработки
-                               Если параметр не задан, то обрабатываются все источники из конфигурационного файла
-    -t, --target=[dir],        Корневой каталог куда будут сохраняться обработанные источники (файлы в json формате)
-                               Если не задан, то будет выбран каталог в котором находится конфигурационный файл
-    -l, --log=[log path],      Путь и имя файла лога. Если не задан, то будет сохранятся в каталог в котором находится конфигурационный файл
-    -d, --debug=[level],       Уровень лога [error, warning, info, notice, debug]. По умолчанию - 'info'
+    -r, --run="id1 id2 id3",   Возможно задать несколько источников для обработки.
+                               Если параметр не задан, то обрабатываются все источники из конфигурационного файла.
+    -t, --target=[dir],        Корневой каталог куда будут сохраняться обработанные источники (файлы в json формате).
+                               Если не задан, то будет выбран каталог в котором находится конфигурационный файл.
+    -f, --force,               Принудительная обработка.
+    -l, --log=[log path],      Путь и имя файла лога. Если не задан, то будет сохранятся в каталог в котором находится конфигурационный файл.
+    -s, --severity=[level],    Уровень лога [error, warning, info, notice, debug]. По умолчанию - 'info'.
 ```
 <details>
 <summary><b>Результаты обработки</b></summary>
