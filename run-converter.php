@@ -27,8 +27,8 @@ require_once 'Converter.php';
 
 ini_set('memory_limit', '256M');
 
-$shortopts = "c:r:l:t:d:";
-$longopts = array('config:', 'run:', 'target', 'log:', 'debig:');
+$shortopts = "c:r:t:fl:s:";
+$longopts = array('config:', 'run:', 'target', 'force', 'log:', 'severity:');
 $options = getopt($shortopts, $longopts);
 $to_process = [];
 $log_path = '';
@@ -57,8 +57,13 @@ foreach ($options as $opt => $value) {
             $converter_config[Converter::WORKDIR] = $value;
             break;
 
-        case 'd':
-        case 'debug':
+        case 'f':
+        case 'force':
+            $converter_config[Converter::FORCE] = true;
+            break;
+
+        case 's':
+        case 'severity':
             $converter_config[Converter::SEVERITY] = $value;
             break;
     }
@@ -74,8 +79,9 @@ if (empty($converter_config['config_file'])) {
     echo "                             If omitted all sources from configuration file will processed." . PHP_EOL;
     echo "  -t, --target=[dir],        Directory were epg files for sources  will be stored." . PHP_EOL;
     echo "                             If omitted log created in the same directory as configuration file." . PHP_EOL;
+    echo "  -f, --force,               Force processing." . PHP_EOL;
     echo "  -l, --log=[log path],      Path to log file. If omitted log created in the same directory as configuration file" . PHP_EOL;
-    echo "  -d, --debug=[level],       Log level [error, warning, info, notice, debug]. Default is 'info'" . PHP_EOL;
+    echo "  -s, --severity=[level],    Log level [error, warning, info, notice, debug]. Default is 'info'" . PHP_EOL;
     echo PHP_EOL;
     echo "Examples: " . PHP_EOL;
     echo "# process all sources from configuration file" . PHP_EOL;
