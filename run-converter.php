@@ -57,6 +57,11 @@ foreach ($options as $opt => $value) {
             $converter_config[Converter::WORKDIR] = $value;
             break;
 
+        case 'p':
+        case 'purge':
+            $converter_config[Converter::PURGE] = $value;
+            break;
+
         case 'f':
         case 'force':
             $converter_config[Converter::FORCE] = true;
@@ -79,6 +84,7 @@ if (empty($converter_config['config_file'])) {
     echo "                             If omitted all sources from configuration file will processed." . PHP_EOL;
     echo "  -t, --target=[dir],        Directory were epg files for sources  will be stored." . PHP_EOL;
     echo "                             If omitted log created in the same directory as configuration file." . PHP_EOL;
+    echo "  -p, --purge,               Force purge stalled files." . PHP_EOL;
     echo "  -f, --force,               Force processing." . PHP_EOL;
     echo "  -l, --log=[log path],      Path to log file. If omitted log created in the same directory as configuration file" . PHP_EOL;
     echo "  -s, --severity=[level],    Log level [error, warning, info, notice, debug]. Default is 'info'" . PHP_EOL;

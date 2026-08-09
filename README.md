@@ -22,6 +22,7 @@ PHP CLI 7.4 or higher. PHP must be built with XML, zlib and sqlite3 support.
                                If omitted all sources from configuration file will processed.
     -t, --target=[dir],        Directory were epg files for sources  will be stored.
                                If omitted log created in the same directory as configuration file.
+    -p, --purge,               Force purge stalled files.
     -f, --force,               Force processing."
     -l, --log=[log path],      Path to log file. If omitted log created in the same directory as configuration file."
     -s, --severity=[level],    Log level [error, warning, info, notice, debug]. Default is 'info'.
@@ -75,6 +76,7 @@ PHP CLI 7.4 или выше. PHP должен быть собран с подд�
                                Если параметр не задан, то обрабатываются все источники из конфигурационного файла.
     -t, --target=[dir],        Корневой каталог куда будут сохраняться обработанные источники (файлы в json формате).
                                Если не задан, то будет выбран каталог в котором находится конфигурационный файл.
+    -p, --purge,               Принудительная очистка неизвестных файлов.
     -f, --force,               Принудительная обработка.
     -l, --log=[log path],      Путь и имя файла лога. Если не задан, то будет сохранятся в каталог в котором находится конфигурационный файл.
     -s, --severity=[level],    Уровень лога [error, warning, info, notice, debug]. По умолчанию - 'info'.

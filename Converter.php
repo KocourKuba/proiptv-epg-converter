@@ -36,6 +36,7 @@ class Converter
     const RUN = 'run';
     const LOGFILE = 'log_file';
     const WORKDIR = 'work_dir';
+    const PURGE = 'purge';
     const FORCE = 'force';
     const SEVERITY = 'severity';
 
@@ -109,6 +110,8 @@ class Converter
 
         $force_processing = isset($converter_config[self::FORCE]) ?? false;
         Logger::log(Logger::Inf, 'Force procesing: ' . var_export($force_processing, true));
+        $force_purge = isset($converter_config[self::PURGE]) ?? false;
+        Logger::log(Logger::Inf, 'Force purge: ' . var_export($force_purge, true));
 
         if (!empty($converter_config[self::RUN])) {
             Logger::log(Logger::Inf, 'Run only: ' . implode(',',$converter_config[self::RUN]));
@@ -118,9 +121,9 @@ class Converter
         $failed = [];
         $skipped = [];
         foreach ($sources as $item) {
-            if (!empty($converter_config[self::RUN] && !in_array($item['id'], $converter_config[self::RUN]))) continue;
+            if (!empty($converter_config[self::RUN]) && !in_array($item['id'], $converter_config[self::RUN])) continue;
 
-            $ret = $this->convert_item($item, $force_processing);
+            $ret = $this->convert_item($item, $force_processing, $force_purge);
             if ($ret === 0) {
                 $failed[] = $item['id'];
             } else if ($ret === 1) {
@@ -144,9 +147,10 @@ class Converter
     /**
      * @param array $source_params
      * @param bool $force_processing
+     * @param bool $force_purge
      * @return int
      */
-    protected function convert_item(array $source_params, bool $force_processing): int
+    protected function convert_item(array $source_params, bool $force_processing, bool $force_purge): int
     {
         $perf = new PerfCollector();
         $perf->reset('start_item');
@@ -216,16 +220,24 @@ class Converter
                 }
                 $perf->setLabel('convert_end');
 
-                $perf->setLabel('purge_start');
-                $purged = $this->purge_stalled($db, $json_path, $purge_stalled);
-                if (!empty($purged)) {
-                    Logger::log(Logger::Inf, "Purge files: " . implode(',', $purged));
+                if (!$force_purge) {
+                    $perf->setLabel('purge_start');
+                    $purged = $this->purge_stalled($db, $json_path, $purge_stalled);
+                    if (!empty($purged)) {
+                        Logger::log(Logger::Inf, "Purge files: " . implode(',', $purged));
+                    }
+                    $perf->setLabel('purge_end');
                 }
-                $perf->setLabel('purge_end');
 
                 $this->save_channels_info($db, $json_path);
             }
 
+            if ($force_purge) {
+                $purged = $this->purge_stalled($db, $json_path, 0);
+                if (!empty($purged)) {
+                    Logger::log(Logger::Inf, "Purge files: " . implode(',', $purged));
+                }
+            }
             $perf->setLabel('end_item');
         } catch(Exception $ex) {
             Logger::log(Logger::Err, $ex->getMessage());
@@ -440,6 +452,7 @@ class Converter
     {
         if (!file_exists($filename)) {
             Logger::log(Logger::Err, "File not exist: $filename");
+            return null;
         }
 
         $handle = fopen($filename, "rb");
@@ -775,7 +788,7 @@ class Converter
                     $write_node($item, $tag, 'country');
                     $urls = get_node_values($tag, 'image');
                     if (!empty($urls)) {
-                        $item['icon_urls'] = $urls;
+                        $item['icons'] = $urls;
                     }
 
                     foreach ($tag->getElementsByTagName('credits') as $sub_tag) {
