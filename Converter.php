@@ -770,9 +770,13 @@ class Converter
                     }
 
                     $write_node($item, $tag, 'sub-title');
-                    $write_node($item, $tag, 'category');
-                    $write_node($item, $tag, 'date');
+                    $write_node($item, $tag, 'category', 'main_category');
+                    $write_node($item, $tag, 'date', 'year');
                     $write_node($item, $tag, 'country');
+                    $urls = get_node_values($tag, 'image');
+                    if (!empty($urls)) {
+                        $item['icon_urls'] = $urls;
+                    }
 
                     foreach ($tag->getElementsByTagName('credits') as $sub_tag) {
                         $write_nodes($item, $sub_tag, 'director');
