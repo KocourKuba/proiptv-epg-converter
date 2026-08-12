@@ -863,13 +863,13 @@ class Converter
         $stalled = array_diff($files, $known_channels, array('channels_info.json'));
         $purged = [];
         if (!empty($stalled)) {
-            Logger::log(Logger::Dbg, "Stalled files: " . json_encode($stalled));
+            Logger::log(Logger::Dbg, "Stalled files: " . implode(',', $stalled));
             $now = time();
             array_map(function ($filename) use ($json_path, $now, $max_days, &$purged) {
                 $filepath = $json_path . '/' . $filename;
                 $mtime = filemtime($filepath);
                 if ($mtime + $max_days * 86400 < $now) {
-                    $purged[] = $filepath;
+                    $purged[] = pathinfo($filepath, PATHINFO_FILENAME);
                     unlink($filepath);
                 }
             }, $stalled);
