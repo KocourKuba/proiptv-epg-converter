@@ -25,7 +25,13 @@
 
 function create_path($path): bool
 {
-    return (is_dir($path) || (mkdir($path, '0777', true) && is_dir($path)));
+    if (!is_dir($path)) {
+        $oldumask = umask(0);
+        mkdir($path, 0775, true);
+        umask($oldumask);
+    }
+
+    return is_dir($path);
 }
 
 /**
