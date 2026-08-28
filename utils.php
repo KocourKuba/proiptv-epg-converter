@@ -239,3 +239,34 @@ function get_node_attribute(DOMElement $node, string $name, string $attribute): 
     return $value;
 }
 
+/**
+ * @param LibXMLError $error
+ * @param string $xml_str
+ * @return string
+ */
+function display_xml_error(LibXMLError $error, string $xml_str): string
+{
+    $xml = explode("\n", $xml_str);
+    $return  = "\n" . $xml[$error->line - 1] . "\n";
+    $return .= str_repeat('-', $error->column) . "^\n";
+
+    switch ($error->level) {
+        case LIBXML_ERR_WARNING:
+            $return .= "Warning $error->code: ";
+            break;
+        case LIBXML_ERR_ERROR:
+            $return .= "Error $error->code: ";
+            break;
+        case LIBXML_ERR_FATAL:
+            $return .= "Fatal Error $error->code: ";
+            break;
+    }
+
+    $return .= trim($error->message) .
+        "\n  Line:   $error->line" .
+        "\n  Column: $error->column";
+
+    return "$return\n--------------------------------------------";
+}
+
+

@@ -555,15 +555,15 @@ class Converter
                 if (feof($file) || empty($line)) continue;
 
                 $xml_node = new DOMDocument();
-                if (!$xml_node->loadXML($line, LIBXML_NOWARNING | LIBXML_NOERROR)) {
-                    Logger::log(Logger::Wrn, "Error parsing xml block:\n$line");
+                if ($xml_node->loadXML($line, LIBXML_NOWARNING | LIBXML_NOERROR) === false) {
+                    Logger::log(Logger::Err, "Error parsing xml block:");
                     foreach (libxml_get_errors() as $error) {
-                        $xml_error = "Error [$error->code] at line $error->line, column $error->column: " . trim($error->message) . "\n";
-                        Logger::log(Logger::Err, $xml_error);
+                        Logger::log(Logger::Err, display_xml_error($error, $line));
                     }
                     libxml_clear_errors();
                     continue;
                 }
+
                 foreach ($xml_node->getElementsByTagName('channel') as $tag) {
                     $channel_id = $tag->getAttribute('id');
                 }
@@ -764,9 +764,12 @@ class Converter
                 $xml_str = "<tv>" . fread($file, $pos['end'] - $pos['start']) . "</tv>";
 
                 $xml_node = new DOMDocument();
-                $res = $xml_node->loadXML($xml_str);
-                if ($res === false) {
-                    Logger::log(Logger::Wrn, "Exception in line:\n$xml_str");
+                if ($xml_node->loadXML($xml_str, LIBXML_NOWARNING | LIBXML_NOERROR) === false) {
+                    Logger::log(Logger::Err, "Error parsing xml block:");
+                    foreach (libxml_get_errors() as $error) {
+                        Logger::log(Logger::Err, display_xml_error($error, $xml_str));
+                    }
+                    libxml_clear_errors();
                     continue;
                 }
 
