@@ -413,7 +413,7 @@ class Converter
             if (file_exists($filename)) {
                 unlink($filename);
             }
-            $ret = 1;
+            $ret = 0;
         }
 
         if (file_exists($tmp_file)) {
