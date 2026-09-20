@@ -40,6 +40,9 @@ class SqlWrapper
     {
         $this->db = new SQLite3($db_path, SQLITE3_OPEN_READWRITE | SQLITE3_OPEN_CREATE, '');
         $this->db->exec('PRAGMA journal_mode=MEMORY;');
+        $this->db->exec('PRAGMA synchronous=OFF;');
+        $this->db->exec('PRAGMA temp_store=MEMORY;');
+        $this->db->exec('PRAGMA cache_size=-8000;');
     }
 
     /**
@@ -81,6 +84,27 @@ class SqlWrapper
     public function prepare(string $query): SQLite3Stmt
     {
         return $this->db->prepare($query);
+    }
+
+    /**
+     * Run a SELECT and return the result cursor so rows can be streamed.
+     * Unlike fetch_array() this never materializes the whole result set, which matters
+     * for tables that hold one row per <programme> block.
+     *
+     * @param string $query
+     * @return SQLite3Result|false
+     */
+    public function query(string $query)
+    {
+        if (empty($query)) {
+            return false;
+        }
+
+        $result = $this->db->query($query);
+        if ($result === false) {
+            Logger::log(Logger::Err, "failed to execute query: $query");
+        }
+        return $result;
     }
 
     /**

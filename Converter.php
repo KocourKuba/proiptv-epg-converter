@@ -40,6 +40,14 @@ class Converter
     const FORCE = 'force';
     const SEVERITY = 'severity';
 
+    /** Sent with every request - some hosts reject clients that identify as nothing. */
+    const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
+    /** Largest slice of xml handed to DOMDocument at once, in bytes. */
+    const PARSE_CHUNK_SIZE = 2097152;
+    /** Read buffer used when scanning the source for tags, in bytes. */
+    const SCAN_BUFFER_SIZE = 262144;
+
     protected static array $http_response_headers;
     protected string $working_dir;
     private int $download_size = 0;
@@ -108,9 +116,9 @@ class Converter
         $perf_all = new PerfCollector();
         $perf_all->reset('start');
 
-        $force_processing = isset($converter_config[self::FORCE]) ?? false;
+        $force_processing = isset($converter_config[self::FORCE]);
         Logger::log(Logger::Inf, 'Force procesing: ' . var_export($force_processing, true));
-        $force_purge = isset($converter_config[self::PURGE]) ?? false;
+        $force_purge = isset($converter_config[self::PURGE]);
         Logger::log(Logger::Inf, 'Force purge: ' . var_export($force_purge, true));
 
         if (!empty($converter_config[self::RUN])) {
@@ -142,6 +150,7 @@ class Converter
         Logger::log(Logger::Perm, "Total failed:     " . count($failed) . " " . implode(',', $failed));
         Logger::log(Logger::Perm, "Total time:       $report_all sec");
         Logger::log_separator();
+        Logger::close();
     }
 
     /**
@@ -302,17 +311,25 @@ class Converter
         $etag = $db->query_value("SELECT value FROM epg_params WHERE param='etag';");
         Logger::log(Logger::Dbg, "Etag: $etag");
 
+        $opts = [];
         $opts[CURLOPT_URL] = $url;
         $opts[CURLOPT_SSL_VERIFYPEER] = 0;
         $opts[CURLOPT_SSL_VERIFYHOST] = 0;
         $opts[CURLOPT_CONNECTTIMEOUT] = 30;
-        $opts[CURLOPT_TIMEOUT] = 120;
+        // No overall deadline: a multi-gigabyte source on a slow link needs far more than
+        // a fixed timeout. A stalled transfer is caught by the low-speed limit instead.
+        $opts[CURLOPT_TIMEOUT] = 0;
+        $opts[CURLOPT_LOW_SPEED_LIMIT] = 512;
+        $opts[CURLOPT_LOW_SPEED_TIME] = 120;
         $opts[CURLOPT_RETURNTRANSFER] = 1;
         $opts[CURLOPT_FOLLOWLOCATION] = 1;
         $opts[CURLOPT_MAXREDIRS] = 5;
         $opts[CURLOPT_FILETIME] = 1;
         $opts[CURLOPT_HEADERFUNCTION] = 'Converter::http_header_function';
         $opts[CURLOPT_ENCODING] = "";
+        // Several sources sit behind a bot filter that answers a request without a
+        // user agent with an HTML challenge page instead of the guide.
+        $opts[CURLOPT_USERAGENT] = self::USER_AGENT;
 
         $tmp_file = $filename . ".tmp";
         $fp = fopen($tmp_file, "w+");
@@ -320,10 +337,8 @@ class Converter
 
         $opts[CURLOPT_HTTPHEADER][] = "Accept: */*";
         $opts[CURLOPT_HTTPHEADER][] = "Pragma: no-cache";
-        $parsed_url = parse_url($url);
-        if (isset($parsed_url['host'])) {
-            $opts[CURLOPT_HTTPHEADER][] = "Host: {$parsed_url['host']}";
-        }
+        // Host is deliberately not pinned here - curl derives it per request, and a fixed
+        // one would be carried over to a redirect that points at a different host.
 
         if (!$force_processing && !$manual_check && !empty($etag)) {
             $opts[CURLOPT_HTTPHEADER][] = "If-None-Match: $etag";
@@ -347,7 +362,7 @@ class Converter
             }
 
             $start_tm = microtime(true);
-            $content = curl_exec($ch);
+            curl_exec($ch);
             $execution_tm = microtime(true) - $start_tm;
             $error_no = curl_errno($ch);
             $error_desc = curl_error($ch);
@@ -364,7 +379,10 @@ class Converter
             }
 
             if ($http_code < 200 || ($http_code >= 300 && $http_code != 301 && $http_code != 304)) {
-                throw new Exception("HTTP request failed ($http_code)\nHTTP response: $content");
+                // the body went to $tmp_file, so curl_exec only returned a bool - show the
+                // start of what the server actually sent, which is what explains the failure
+                $body = file_exists($tmp_file) ? trim(file_get_contents($tmp_file, false, null, 0, 512)) : '';
+                throw new Exception("HTTP request failed ($http_code)\nHTTP response: $body");
             }
 
             if ($error_no !== 0) {
@@ -456,28 +474,41 @@ class Converter
         }
 
         $handle = fopen($filename, "rb");
-        $hdr = fread($handle, 8);
+        if ($handle === false) {
+            Logger::log(Logger::Err, "Can't open file: $filename");
+            return null;
+        }
+
+        $hdr = fread($handle, 64);
         fclose($handle);
 
-        if (0 === mb_strpos($hdr, "\x1f\x8b\x08")) {
+        if (strncmp($hdr, "\x1f\x8b\x08", 3) === 0) {
             Logger::log(Logger::Dbg, 'GZ signature:  ' . bin2hex(substr($hdr, 0, 3)));
             Logger::log(Logger::Inf, 'UnGZIP: ' . $filename);
-            $filename = extractGzipFile($filename);
-            if (is_null($filename)) {
+            $unpacked = extractGzipFile($filename);
+            if (is_null($unpacked)) {
                 Logger::log(Logger::Err, "Failed to unpack $filename");
             }
-        } else if (0 === mb_strpos($hdr, "\x50\x4b\x03\x04")) {
+            $filename = $unpacked;
+        } else if (strncmp($hdr, "\x50\x4b\x03\x04", 4) === 0) {
             Logger::log(Logger::Dbg, 'ZIP signature: ' . bin2hex(substr($hdr, 0, 4)));
             Logger::log(Logger::Inf, 'UnZIP: ' . $filename);
-            $filename = extractZipArchive($filename);
-            if (is_null($filename)) {
+            $unpacked = extractZipArchive($filename);
+            if (is_null($unpacked)) {
                 Logger::log(Logger::Err, "Failed to unpack $filename");
             }
-        } else if (false !== mb_strpos($hdr, "<?xml")) {
-            Logger::log(Logger::Dbg, 'XML signature:  ' . bin2hex(substr($hdr, 0, 3)));
+            $filename = $unpacked;
         } else {
-            Logger::log(Logger::Err, 'Unsupported format! ' . $filename);
-            return null;
+            // tolerate an utf-8 bom and any leading whitespace, and accept a guide that
+            // opens straight at <tv> without an XML declaration
+            $probe = ltrim($hdr, "\xEF\xBB\xBF \t\r\n");
+            if (strncmp($probe, '<?xml', 5) === 0 || strncmp($probe, '<tv', 3) === 0) {
+                Logger::log(Logger::Dbg, 'XML signature: ' . bin2hex(substr($probe, 0, 5)));
+            } else {
+                Logger::log(Logger::Err, 'Unsupported format! ' . $filename);
+                Logger::log(Logger::Err, 'First bytes: ' . bin2hex(substr($hdr, 0, 16)));
+                return null;
+            }
         }
 
         return $filename;
@@ -515,44 +546,72 @@ class Converter
                 throw new Exception("Error transaction: $query");
             }
 
-            $query = '';
-            $last_buffer = '';
-            while (!feof($file)) {
-                // search for open tag <channel>
-                $chunk = fread($file, 8192);
-                $buffer = $last_buffer . $chunk;
-                $pos = strpos($buffer, '<channel id');
-                if ($pos === false) {
-                    $last_buffer = $chunk;
-                    continue;
-                }
+            // Bound parameters instead of one concatenated mega-query: the old form held
+            // every INSERT for the whole file in a single string before sqlite even saw it,
+            // and made sqlite parse each statement from scratch.
+            $db->exec('BEGIN;');
 
-                // calculate start position in file and seek to + length of searched tag
-                $last_buffer = '';
-                $start_pos = ftell($file) - strlen($buffer) + $pos;
-                fseek($file, $start_pos + 11);
+            $stm_picon = $db->prepare('INSERT OR REPLACE INTO epg_picons (picon_hash, picon_url) VALUES(:picon_hash, :picon_url);');
+            $stm_channel = $db->prepare('INSERT OR IGNORE INTO epg_channels (alias,alias_orig,channel_id,picon_hash) VALUES (:alias,:alias_orig,:channel_id,:picon_hash);');
 
-                // read content until closed tag found
-                $line = '';
-                while (!feof($file)) {
-                    // search for closing tag </channel>
-                    $chunk = fread($file, 8192);
-                    $buffer = $last_buffer . $chunk;
-                    $pos = strpos($buffer, '</channel>');
-                    if ($pos === false) {
-                        $last_buffer = $chunk;
+            /** @var string $picon_hash */
+            /** @var string $picon_url */
+            /** @var string $alias */
+            /** @var string $alias_orig */
+            /** @var string $channel_id */
+            $stm_picon->bindParam(':picon_hash', $picon_hash);
+            $stm_picon->bindParam(':picon_url', $picon_url);
+            $stm_channel->bindParam(':alias', $alias);
+            $stm_channel->bindParam(':alias_orig', $alias_orig);
+            $stm_channel->bindParam(':channel_id', $channel_id);
+            $stm_channel->bindParam(':picon_hash', $picon_hash);
+
+            // Single forward pass: the buffer slides over the file so every byte is read
+            // once, instead of seeking back to re-read each <channel> block.
+            $buffer = '';
+            $eof = false;
+            $have_open = false;
+            $scan_from = 0;
+            $open_tag = '<channel id';
+            $open_len = 11;     // strlen('<channel id')
+            $close_tag = '</channel>';
+            $close_len = 10;    // strlen('</channel>')
+
+            while (true) {
+                if (!$have_open) {
+                    $open_pos = strpos($buffer, $open_tag);
+                    if ($open_pos === false) {
+                        if ($eof) break;
+                        // keep just enough tail for a tag straddling two reads
+                        if (strlen($buffer) > $open_len - 1) {
+                            $buffer = substr($buffer, -($open_len - 1));
+                        }
+                        $chunk = fread($file, self::SCAN_BUFFER_SIZE);
+                        if ($chunk === false || $chunk === '') $eof = true; else $buffer .= $chunk;
                         continue;
                     }
 
-                    $last_buffer = '';
-                    // calculate end position in file
-                    $end_pos = ftell($file) - strlen($buffer) + $pos + 10;
-                    // seek to start position and read found text
-                    fseek($file, $start_pos);
-                    $line = fread($file, $end_pos - $start_pos);
-                    break;
+                    if ($open_pos > 0) {
+                        $buffer = substr($buffer, $open_pos);
+                    }
+                    $have_open = true;
+                    $scan_from = $open_len;
                 }
-                if (feof($file) || empty($line)) continue;
+
+                $close_pos = strpos($buffer, $close_tag, $scan_from);
+                if ($close_pos === false) {
+                    if ($eof) break;
+                    // never re-scan what was already searched
+                    $scan_from = max($open_len, strlen($buffer) - ($close_len - 1));
+                    $chunk = fread($file, self::SCAN_BUFFER_SIZE);
+                    if ($chunk === false || $chunk === '') $eof = true; else $buffer .= $chunk;
+                    continue;
+                }
+
+                $end_pos = $close_pos + $close_len;
+                $line = substr($buffer, 0, $end_pos);
+                $buffer = substr($buffer, $end_pos);
+                $have_open = false;
 
                 $xml_node = new DOMDocument();
                 if ($xml_node->loadXML($line, LIBXML_NOWARNING | LIBXML_NOERROR) === false) {
@@ -564,46 +623,49 @@ class Converter
                     continue;
                 }
 
-                foreach ($xml_node->getElementsByTagName('channel') as $tag) {
-                    $channel_id = $tag->getAttribute('id');
-                }
-
+                $channel = $xml_node->documentElement;
+                $channel_id = $channel === null ? '' : $channel->getAttribute('id');
                 if (empty($channel_id)) continue;
 
-                $q_channel_id = SqlWrapper::sql_quote($channel_id);
+                // one walk of the children collects the picon and every display-name
                 $picon_hash = '';
-                foreach ($xml_node->getElementsByTagName('icon') as $tag) {
-                    if (is_proto_http($tag->getAttribute('src'))) {
-                        $picon_url = $tag->getAttribute('src');
-                        if (!empty($picon_url)) {
-                            $picon_hash = md5($picon_url);
-                            $query .= sprintf('INSERT OR REPLACE INTO epg_picons (picon_hash, picon_url) VALUES(%s, %s);',
-                                SqlWrapper::sql_quote($picon_hash), SqlWrapper::sql_quote($picon_url));
-                            break;
+                $picon_url = '';
+                $names = [];
+                for ($node = $channel->firstChild; $node !== null; $node = $node->nextSibling) {
+                    if ($node->nodeType !== XML_ELEMENT_NODE) continue;
+                    if ($node->nodeName === 'display-name') {
+                        $names[] = $node->nodeValue;
+                    } else if ($node->nodeName === 'icon' && $picon_url === '') {
+                        $src = $node->getAttribute('src');
+                        if ($src !== '' && is_proto_http($src)) {
+                            $picon_url = $src;
+                            $picon_hash = md5($src);
                         }
                     }
                 }
 
-                $q_picon_hash = SqlWrapper::sql_quote($picon_hash);
-                $q_alias = SqlWrapper::sql_quote(mb_convert_case($channel_id, MB_CASE_LOWER, "UTF-8"));
-                $q_alias_orig = SqlWrapper::sql_quote($channel_id);
-                $query .= sprintf('INSERT OR IGNORE INTO epg_channels (alias,alias_orig,channel_id,picon_hash) VALUES (%s,%s,%s,%s);',
-                    $q_alias, $q_alias_orig, $q_channel_id, $q_picon_hash);
+                if ($picon_url !== '') {
+                    $stm_picon->execute();
+                }
 
-                foreach ($xml_node->getElementsByTagName('display-name') as $tag) {
-                    $q_alias = SqlWrapper::sql_quote(mb_convert_case($tag->nodeValue, MB_CASE_LOWER, "UTF-8"));
-                    $q_alias_orig = SqlWrapper::sql_quote($tag->nodeValue);
-                    $query .= sprintf('INSERT OR IGNORE INTO epg_channels (alias,alias_orig,channel_id,picon_hash) VALUES (%s,%s,%s,%s);',
-                        $q_alias, $q_alias_orig, $q_channel_id, $q_picon_hash);
+                $alias = mb_convert_case($channel_id, MB_CASE_LOWER, "UTF-8");
+                $alias_orig = $channel_id;
+                $stm_channel->execute();
+
+                foreach ($names as $name) {
+                    $alias = mb_convert_case($name, MB_CASE_LOWER, "UTF-8");
+                    $alias_orig = $name;
+                    $stm_channel->execute();
                 }
             }
-            $db->exec_transaction($query);
+
+            $db->exec('COMMIT;');
 
             $channels = (int)$db->query_value('SELECT count(DISTINCT channel_id) FROM epg_channels;');
             $picons = (int)$db->query_value('SELECT COUNT(*) FROM epg_picons;');
 
             $query = 'DROP TABLE IF EXISTS epg_entries;';
-            $query .= 'CREATE TABLE epg_entries (channel_id STRING NOT NULL, start INTEGER, end INTEGER, UNIQUE (channel_id, start) ON CONFLICT REPLACE);';
+            $query .= 'CREATE TABLE epg_entries (channel_id TEXT NOT NULL, start INTEGER, end INTEGER, UNIQUE (channel_id, start) ON CONFLICT REPLACE);';
             $res = $db->exec_transaction($query);
             if (!$res) {
                 throw new Exception("Error transaction: $query");
@@ -661,6 +723,13 @@ class Converter
                 $channel_id = substr($line, $ch_start, $ch_end - $ch_start);
                 if (empty($channel_id)) continue;
 
+                // This attribute is read straight out of the raw text, while the channel
+                // table holds ids the XML parser already decoded. Without decoding here an
+                // id like "A&amp;E" never matches its channel and the whole channel is lost.
+                if (strpos($channel_id, '&') !== false) {
+                    $channel_id = html_entity_decode($channel_id, ENT_QUOTES | ENT_XML1, 'UTF-8');
+                }
+
                 if ($prev_channel === null) {
                     $prev_channel = $channel_id;
                     $start_program_block = $tag_start_pos;
@@ -717,22 +786,6 @@ class Converter
             return false;
         }
 
-        $is_win = (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN');
-
-        $write_node = function(&$item, $tag, $node_name, $tag_name = null) {
-            $value = get_node_value($tag, $node_name);
-            if (!empty($value)) {
-                $item[$tag_name ?? $node_name] = $value;
-            }
-        };
-
-        $write_nodes = function(&$item, $tag, $node_name, $tag_name = null) {
-            $value = get_node_values($tag, $node_name);
-            if (!empty($value)) {
-                $item[$tag_name ?? $node_name] = implode(", ", $value);
-            }
-        };
-
         $file = fopen($indexed_file, 'rb');
         if ($file === false) {
             Logger::log(Logger::Err, "File $indexed_file can't be opened");
@@ -740,29 +793,100 @@ class Converter
         }
 
         $query = 'SELECT DISTINCT channel_id, picon_url FROM epg_channels as ch LEFT JOIN epg_picons as pic ON ch.picon_hash = pic.picon_hash;';
+        $picons = [];
+        $stored = 0;
+        $result = $db->query($query);
+        if ($result === false) {
+            fclose($file);
+            return false;
+        }
+        while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
+            // cast so a channel without a picon still registers as a known key
+            $picons[$row['channel_id']] = (string)$row['picon_url'];
+            ++$stored;
+        }
+
         $total = 0;
-        $channel_ids = $db->fetch_array($query);
-        $stored = count($channel_ids);
-        foreach ($channel_ids as $row) {
-            $channel_id = $row['channel_id'];
-            $query = sprintf('SELECT start, end FROM epg_entries WHERE channel_id = %s;', SqlWrapper::sql_quote($channel_id));
-            $channel_positions = $db->fetch_array($query);
-            if (empty($channel_positions)) {
-                Logger::log(Logger::Dbg, "No positions for channel: $channel_id");
+        $written = [];
+        $channel_id = null;
+        $picon_url = '';
+        $item_str = '';
+
+        $flush = function () use (&$channel_id, &$picon_url, &$item_str, &$total, $json_path) {
+            if ($channel_id === null || $item_str === '') {
+                return;
+            }
+
+            $str = '{' . PHP_EOL;
+            if ($picon_url !== '') {
+                $str .= trim(json_encode(array('epg_picon' => $picon_url), JSON_UNESCAPED_SLASHES), "{}") . ',' . PHP_EOL;
+            }
+            $str .= '"epg_data": [' . PHP_EOL;
+            $str .= $item_str;
+            $str .= PHP_EOL . ']}';
+
+            file_put_contents($json_path . '/' . escape_channel_filename($channel_id) . '.json', $str);
+            ++$total;
+        };
+
+        // One ordered pass over every block beats a SELECT per channel: the rows arrive
+        // already grouped by channel, so each channel is flushed when the id changes and
+        // nothing more than the current channel is ever held in memory.
+        $result = $db->query('SELECT channel_id, start, end FROM epg_entries ORDER BY channel_id, start;');
+        if ($result === false) {
+            fclose($file);
+            return false;
+        }
+
+        while ($pos = $result->fetchArray(SQLITE3_ASSOC)) {
+            // epg_entries.channel_id is declared STRING, which sqlite reads as NUMERIC
+            // affinity, so an id like "36.6" comes back as a float - force it back to text
+            $row_id = is_string($pos['channel_id']) ? $pos['channel_id'] : (string)$pos['channel_id'];
+            if ($row_id !== $channel_id) {
+                $flush();
+                $channel_id = $row_id;
+                $item_str = '';
+                // a <programme> may name a channel that has no <channel> element - skip it,
+                // as driving the loop from epg_channels used to do
+                if (!isset($picons[$channel_id])) {
+                    $channel_id = null;
+                    continue;
+                }
+                $picon_url = $picons[$channel_id];
+                $written[$channel_id] = true;
+            }
+
+            fseek($file, $pos['start']);
+            $length = $pos['end'] - $pos['start'];
+            if ($length <= 0) {
+                Logger::log(Logger::Wrn, "Mismatch start '{$pos['start']}' and end '{$pos['end']}' positions for $channel_id");
                 continue;
             }
 
-            $item_str = '';
-            foreach ($channel_positions as $pos) {
-                fseek($file, $pos['start']);
-                $length = $pos['end'] - $pos['start'];
-                if ($length <= 0) {
-                    Logger::log(Logger::Wrn, "Mismatch start '{$pos['start']}' and end '{$pos['end']}' positions for $channel_id");
-                    continue;
+            $block = fread($file, $length);
+
+            // A DOM tree costs roughly 20x the source it is built from, so a block is
+            // parsed in pieces cut on </programme> boundaries to keep memory bounded.
+            $block_len = strlen($block);
+            $offset = 0;
+            while ($offset < $block_len) {
+                if ($block_len - $offset <= self::PARSE_CHUNK_SIZE) {
+                    $piece = substr($block, $offset);
+                    $offset = $block_len;
+                } else {
+                    $cut = strrpos($block, '</programme>', ($offset + self::PARSE_CHUNK_SIZE) - $block_len);
+                    if ($cut === false || $cut <= $offset) {
+                        // single programme larger than the chunk size - take the whole rest
+                        $piece = substr($block, $offset);
+                        $offset = $block_len;
+                    } else {
+                        $cut += 12;
+                        $piece = substr($block, $offset, $cut - $offset);
+                        $offset = $cut;
+                    }
                 }
 
-                $xml_str = "<tv>" . fread($file, $pos['end'] - $pos['start']) . "</tv>";
-
+                $xml_str = "<tv>$piece</tv>";
                 $xml_node = new DOMDocument();
                 if ($xml_node->loadXML($xml_str, LIBXML_NOWARNING | LIBXML_NOERROR) === false) {
                     Logger::log(Logger::Err, "Error parsing xml block:");
@@ -773,63 +897,27 @@ class Converter
                     continue;
                 }
 
-                $item = [];
-                foreach ($xml_node->getElementsByTagName('programme') as $tag) {
-                    $item['name'] = get_node_value($tag, 'title');
-                    $item['time'] = strtotime($tag->getAttribute('start'));
-                    $item['time_to'] = strtotime($tag->getAttribute('stop'));
-                    $item['descr'] = get_node_value($tag, 'desc');
+                // walk the siblings directly - iterating the live DOMNodeList that
+                // getElementsByTagName() returns is quadratic in the number of <programme>
+                for ($tag = $xml_node->documentElement->firstChild; $tag !== null; $tag = $tag->nextSibling) {
+                    if ($tag->nodeType !== XML_ELEMENT_NODE || $tag->nodeName !== 'programme') continue;
 
-                    $icon = get_node_attribute($tag, 'icon', 'src');
-                    if (!empty($icon) && is_proto_http($icon)) {
-                        $item['icon'] = $icon;
-                    }
-
-                    $write_node($item, $tag, 'sub-title');
-                    $write_node($item, $tag, 'category', 'main_category');
-                    $write_node($item, $tag, 'date', 'year');
-                    $write_node($item, $tag, 'country');
-                    $urls = get_node_values($tag, 'image');
-                    if (!empty($urls)) {
-                        $item['icons'] = $urls;
-                    }
-
-                    foreach ($tag->getElementsByTagName('credits') as $sub_tag) {
-                        $write_nodes($item, $sub_tag, 'director');
-                        $write_nodes($item, $sub_tag, 'producer');
-                        $write_nodes($item, $sub_tag, 'actor');
-                        $write_nodes($item, $sub_tag, 'presenter');
-                        $write_nodes($item, $sub_tag, 'writer');
-                        $write_nodes($item, $sub_tag, 'editor');
-                        $write_nodes($item, $sub_tag, 'composer');
-                    }
+                    $item = parse_programme_node($tag);
                     if (!empty($item_str)) {
                         $item_str .= ",\n";
                     }
                     $item_str .= json_encode($item, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
                 }
             }
+        }
 
-            if (!empty($item_str)) {
-                $str = '{' . PHP_EOL;
-                if (!empty($row['picon_url'])) {
-                    $str .= trim(json_encode(array('epg_picon' => $row['picon_url']), JSON_UNESCAPED_SLASHES), "{}") . ',' . PHP_EOL;
+        $flush();
+
+        if (Logger::isEnabled(Logger::Dbg)) {
+            foreach ($picons as $id => $unused) {
+                if (!isset($written[$id])) {
+                    Logger::log(Logger::Dbg, "No positions for channel: $id");
                 }
-                $str .= '"epg_data": [' . PHP_EOL;
-                $str .= $item_str;
-                $str .= PHP_EOL . ']}';
-
-                if ($is_win) {
-                    $escaped_name = str_replace(array('/','\\','\"','?','*','<','>','|',':'), array('%2F','%5C','%22','%3F','%2A','%3C','%3E','%7C','%3A'), $channel_id);
-                } else {
-                    $escaped_name = str_replace('/', '%2F', $channel_id);
-                }
-                $json_file = $json_path . '/' . $escaped_name . '.json';
-
-                $f = fopen($json_file, 'wb');
-                fwrite($f, $str);
-                fclose($f);
-                ++$total;
             }
         }
 
@@ -855,7 +943,7 @@ class Converter
         $known_channels = $db->fetch_array('SELECT DISTINCT channel_id from epg_channels;', 'channel_id');
 
         $known_channels = array_map(function ($channel_id) {
-            return str_replace('/', '%2F', $channel_id) . '.json';
+            return escape_channel_filename((string)$channel_id) . '.json';
         }, $known_channels);
 
         $files = [];

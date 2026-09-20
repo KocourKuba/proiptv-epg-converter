@@ -188,55 +188,126 @@ function extractZipArchive(string $archive): ?string
 }
 
 /**
- * @param DOMElement $node
- * @param string $name
+ * Map a channel id onto the name its json file is stored under.
+ *
+ * Both the writer and the purger must agree on this, otherwise files that are perfectly
+ * current look unknown to the purge pass and get deleted.
+ *
+ * @param string $channel_id
  * @return string
  */
-function get_node_value(DOMElement $node, string $name): string
+function escape_channel_filename(string $channel_id): string
 {
-    $value = '';
-    foreach ($node->getElementsByTagName($name) as $element) {
-        if (!empty($element->nodeValue)) {
-            $value = $element->nodeValue;
-            break;
-        }
+    static $is_win = null;
+    if ($is_win === null) {
+        $is_win = (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN');
     }
 
-    return $value;
+    if ($is_win) {
+        return str_replace(
+            array('/', '\\', '"', '?', '*', '<', '>', '|', ':'),
+            array('%2F', '%5C', '%22', '%3F', '%2A', '%3C', '%3E', '%7C', '%3A'),
+            $channel_id);
+    }
+
+    return str_replace('/', '%2F', $channel_id);
 }
 
 /**
- * @param DOMElement $node
- * @param string $name
+ * Collect every field of a <programme> element in a single pass over its children.
+ *
+ * Walking the child list once is what makes this cheap. Reaching for
+ * getElementsByTagName() per field re-scans the subtree each time, and iterating the
+ * returned live DOMNodeList is quadratic in the number of nodes, which dominates the
+ * run time on channels that carry a lot of programmes.
+ *
+ * @param DOMElement $tag
  * @return array
  */
-function get_node_values(DOMElement $node, string $name): array
+function parse_programme_node(DOMElement $tag): array
 {
-    $values = [];
-    foreach ($node->getElementsByTagName($name) as $element) {
-        if (!empty($element->nodeValue)) {
-            $values[] = $element->nodeValue;
+    static $roles = array(
+        'director' => true, 'producer' => true, 'actor' => true, 'presenter' => true,
+        'writer' => true, 'editor' => true, 'composer' => true,
+    );
+
+    $title = '';
+    $desc = '';
+    $icon = '';
+    $sub_title = '';
+    $category = '';
+    $date = '';
+    $country = '';
+    $images = [];
+    $credits = [];
+
+    for ($node = $tag->firstChild; $node !== null; $node = $node->nextSibling) {
+        if ($node->nodeType !== XML_ELEMENT_NODE) continue;
+
+        // first non-empty value wins, matching get_node_value()
+        switch ($node->nodeName) {
+            case 'title':
+                if ($title === '') $title = $node->nodeValue;
+                break;
+            case 'desc':
+                if ($desc === '') $desc = $node->nodeValue;
+                break;
+            case 'sub-title':
+                if ($sub_title === '') $sub_title = $node->nodeValue;
+                break;
+            case 'category':
+                if ($category === '') $category = $node->nodeValue;
+                break;
+            case 'date':
+                if ($date === '') $date = $node->nodeValue;
+                break;
+            case 'country':
+                if ($country === '') $country = $node->nodeValue;
+                break;
+            case 'icon':
+                if ($icon === '') $icon = $node->getAttribute('src');
+                break;
+            case 'image':
+                $value = $node->nodeValue;
+                if ($value !== '') $images[] = $value;
+                break;
+            case 'credits':
+                $found = [];
+                for ($credit = $node->firstChild; $credit !== null; $credit = $credit->nextSibling) {
+                    if ($credit->nodeType !== XML_ELEMENT_NODE) continue;
+                    $role = $credit->nodeName;
+                    if (!isset($roles[$role])) continue;
+                    $value = $credit->nodeValue;
+                    if ($value !== '') $found[$role][] = $value;
+                }
+                // a later <credits> overrides an earlier one per role, as before
+                foreach ($found as $role => $values) {
+                    $credits[$role] = implode(', ', $values);
+                }
+                break;
         }
     }
 
-    return $values;
-}
+    // key order here defines the key order in the generated JSON
+    $item = array(
+        'name' => $title,
+        'time' => strtotime($tag->getAttribute('start')),
+        'time_to' => strtotime($tag->getAttribute('stop')),
+        'descr' => $desc,
+    );
 
-/**
- * @param DOMElement $node
- * @param string $name
- * @param string $attribute
- * @return string
- */
-function get_node_attribute(DOMElement $node, string $name, string $attribute): string
-{
-    $value = '';
-    foreach ($node->getElementsByTagName($name) as $element) {
-        $value = $element->getAttribute($attribute);
-        break;
+    if ($icon !== '' && is_proto_http($icon)) $item['icon'] = $icon;
+    if ($sub_title !== '') $item['sub-title'] = $sub_title;
+    if ($category !== '') $item['main_category'] = $category;
+    if ($date !== '') $item['year'] = $date;
+    if ($country !== '') $item['country'] = $country;
+    if (!empty($images)) $item['icons'] = $images;
+
+    foreach ($credits as $role => $value) {
+        $item[$role] = $value;
     }
 
-    return $value;
+    return $item;
 }
 
 /**
