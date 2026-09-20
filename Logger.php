@@ -40,10 +40,26 @@ class Logger
 
     protected static string $log_path = 'converter.log';
     protected static int $severity = self::Inf;
+    /** @var resource|null Held open so a debug run does not reopen the file per line. */
+    protected static $handle = null;
 
     public static function setLogPath(string $log_path): void
     {
+        self::close();
         self::$log_path = $log_path;
+    }
+
+    /**
+     * Flush and release the log file. Safe to call repeatedly.
+     *
+     * @return void
+     */
+    public static function close(): void
+    {
+        if (self::$handle !== null) {
+            fclose(self::$handle);
+            self::$handle = null;
+        }
     }
 
     public static function setSeverity(string $severity): void
@@ -67,6 +83,18 @@ class Logger
         }
     }
 
+    /**
+     * Whether a message of this severity would be written, so callers can skip
+     * building log text that would be thrown away.
+     *
+     * @param int $severity
+     * @return bool
+     */
+    public static function isEnabled(int $severity): bool
+    {
+        return $severity >= self::$severity;
+    }
+
     public static function log_separator(int $severity = Logger::Inf): void
     {
         self::log($severity, str_repeat('-', 80));
@@ -87,10 +115,19 @@ class Logger
             $value .= PHP_EOL;
         }
 
-        $fp = fopen(self::$log_path, "a");
-        if ($fp) {
-            fwrite($fp, date("[Y.m.d H:i:s] ") . $value);
-            fclose($fp);
+        if (self::$handle === null) {
+            $fp = fopen(self::$log_path, 'a');
+            if ($fp === false) {
+                return;
+            }
+            self::$handle = $fp;
+        }
+
+        fwrite(self::$handle, date("[Y.m.d H:i:s] ") . $value);
+
+        // keep anything worth diagnosing on disk even if the run dies later
+        if ($severity >= self::Wrn) {
+            fflush(self::$handle);
         }
     }
 }
