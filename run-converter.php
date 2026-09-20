@@ -27,8 +27,8 @@ require_once 'Converter.php';
 
 ini_set('memory_limit', '256M');
 
-$shortopts = "c:r:t:fl:s:";
-$longopts = array('config:', 'run:', 'target', 'force', 'log:', 'severity:');
+$shortopts = "c:r:t:fpl:s:";
+$longopts = array('config:', 'run:', 'target:', 'force', 'purge', 'log:', 'severity:');
 $options = getopt($shortopts, $longopts);
 $to_process = [];
 $log_path = '';
@@ -59,7 +59,7 @@ foreach ($options as $opt => $value) {
 
         case 'p':
         case 'purge':
-            $converter_config[Converter::PURGE] = $value;
+            $converter_config[Converter::PURGE] = true;
             break;
 
         case 'f':
