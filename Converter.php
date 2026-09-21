@@ -23,6 +23,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
+require_once 'HtmlReport.php';
 require_once 'Logger.php';
 require_once 'PerfCollector.php';
 require_once 'SqlWrapper.php';
@@ -32,6 +33,8 @@ global $logger;
 
 class Converter
 {
+    const VERSION = '1.3';
+
     const CONFIG = 'config_file';
     const RUN = 'run';
     const LOGFILE = 'log_file';
@@ -39,6 +42,10 @@ class Converter
     const PURGE = 'purge';
     const FORCE = 'force';
     const SEVERITY = 'severity';
+    const HTMLPAGE = 'html_page';
+
+    /** Name of the info page when --html is given without one. */
+    const HTMLPAGE_DEFAULT = 'index.html';
 
     /** Sent with every request - some hosts reject clients that identify as nothing. */
     const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
@@ -48,9 +55,14 @@ class Converter
     /** Read buffer used when scanning the source for tags, in bytes. */
     const SCAN_BUFFER_SIZE = 262144;
 
+    /** @var array */
     protected static array $http_response_headers;
+    /** @var string */
     protected string $working_dir;
+    /** @var int */
     private int $download_size = 0;
+    /** @var HtmlReport|null Collects per source statistics. Null when the info page was not requested. */
+    private ?HtmlReport $report = null;
 
     /**
      * @return array
@@ -75,7 +87,7 @@ class Converter
      */
     public function process(array $converter_config): void
     {
-        $config_file = $converter_config[self::CONFIG];
+        $config_file = (string)safe_get_value($converter_config, self::CONFIG, '');
         if (!file_exists($config_file)) {
             echo "Error! Configuration file '$config_file' not found!";
             return;
@@ -105,8 +117,14 @@ class Converter
 
         $sources = json_decode(file_get_contents($config_file), true);
 
-        Logger::log(Logger::Perm, 'ProIPTV EPG Converter v1.2');
+        Logger::log(Logger::Perm, 'ProIPTV EPG Converter v' . self::VERSION);
         Logger::log(Logger::Perm, 'Working directory: ' . $this->working_dir);
+
+        $html_page = $this->resolve_html_page($converter_config);
+        if ($html_page !== null) {
+            Logger::log(Logger::Inf, "Info page: $html_page");
+            $this->report = new HtmlReport(self::VERSION);
+        }
 
         if (empty($sources)) {
             Logger::log(Logger::Err, 'Empty sources configuration');
@@ -129,20 +147,37 @@ class Converter
         $failed = [];
         $skipped = [];
         foreach ($sources as $item) {
-            if (!empty($converter_config[self::RUN]) && !in_array($item['id'], $converter_config[self::RUN])) continue;
+            // an entry with no id is rejected by convert_item, which reports why - read it
+            // without assuming it is there, since a missing key is a warning as of PHP 8.0
+            $item_id = (string)safe_get_value($item, 'id', '');
+            // --run holds strings and the id is cast to one, so a strict match is exact.
+            // It also keeps a JSON id given as a number (id: 146) out of the loose
+            // int-to-string comparison, whose rules changed in PHP 8.0.
+            if (!empty($converter_config[self::RUN]) && !in_array($item_id, $converter_config[self::RUN], true)) {
+                // the page covers the whole configuration, not just what this run touched
+                if ($this->report !== null) {
+                    $this->report_not_run($item);
+                }
+                continue;
+            }
 
             $ret = $this->convert_item($item, $force_processing, $force_purge);
             if ($ret === 0) {
-                $failed[] = $item['id'];
+                $failed[] = $item_id;
             } else if ($ret === 1) {
-                $success[] = $item['id'];
+                $success[] = $item_id;
             } else {
-                $skipped[] = $item['id'];
+                $skipped[] = $item_id;
             }
         }
 
         $perf_all->setLabel('end');
         $report_all = $perf_all->getReportItem(PerfCollector::TIME, 'start', 'end');
+
+        if ($this->report !== null && $html_page !== null) {
+            $this->report->set_run_time((float)$report_all);
+            $this->report->save($html_page);
+        }
 
         Logger::log(Logger::Perm, "Total downloaded: " . convert_bytes($this->download_size));
         Logger::log(Logger::Perm, "Total converted:  " . count($success) . " " . implode(',', $success));
@@ -167,12 +202,17 @@ class Converter
         $source_id = safe_get_value($source_params, 'id');
         if (empty($source_id)) {
             Logger::log(Logger::Err, 'Empty name not allowed in sources.conf');
+            // nothing identifies this entry, but the page should still show that the
+            // configuration holds an entry that cannot be processed
+            $this->report_broken_entry('(no id)', (string)safe_get_value($source_params, 'url', ''),
+                'Empty id in configuration');
             return 0;
         }
 
         $url = safe_get_value($source_params, 'url');
         if (empty($url)) {
             Logger::log(Logger::Err, 'Empty URL not allowed in sources.conf');
+            $this->report_broken_entry($source_id, '', 'Empty url in configuration');
             return 0;
         }
 
@@ -184,9 +224,10 @@ class Converter
 
         $db = new SqlWrapper();
         $db_path = "$this->working_dir/$source_id/$source_id.db";
+        $json_path = "$this->working_dir/$source_id/epg";
         $ret = 0;
+        $error = '';
         try {
-            $json_path = "$this->working_dir/$source_id/epg";
             if (!create_path($json_path)) {
                 throw new Exception("Directory '$json_path' can't be created");
             }
@@ -249,8 +290,13 @@ class Converter
             }
             $perf->setLabel('end_item');
         } catch(Exception $ex) {
-            Logger::log(Logger::Err, $ex->getMessage());
+            $error = $ex->getMessage();
+            Logger::log(Logger::Err, $error);
         } finally {
+            // a source that threw never reached the label above, and its elapsed time is
+            // exactly what is worth knowing about it
+            $perf->setLabel('end_item');
+
             if (!$keep_source && file_exists($xmltv_source)) {
                 Logger::log(Logger::Dbg, "Remove source file: $xmltv_source");
                 unlink($xmltv_source);
@@ -275,7 +321,149 @@ class Converter
         Logger::log(Logger::Inf, "Source conversion time: $report_all secs");
         Logger::log_separator();
 
+        $this->report?->add($this->collect_stats($db, $source_id, $url, $json_path,
+            SourceStatus::from_result($ret), $error, (float)$report_all));
+
         return $ret;
+    }
+
+    /**
+     * Report a configuration entry that cannot be processed at all.
+     *
+     * @param string $source_id
+     * @param string $url
+     * @param string $error
+     * @return void
+     */
+    protected function report_broken_entry(string $source_id, string $url, string $error): void
+    {
+        if ($this->report === null) {
+            return;
+        }
+
+        $this->report->add(new SourceReport(array(
+            'id' => $source_id,
+            'url' => $url,
+            'status' => SourceStatus::FAILED,
+            'error' => $error,
+        )));
+    }
+
+    /**
+     * Report a source the run left alone, so the page still covers everything the
+     * configuration lists. Its database is opened only if it already exists - a source
+     * that was never converted must not get an empty one created behind its back.
+     *
+     * @param array $source_params
+     * @return void
+     */
+    protected function report_not_run(array $source_params): void
+    {
+        $source_id = safe_get_value($source_params, 'id');
+        if (empty($source_id)) {
+            // not "not run" - an entry with no id cannot be processed by any run, and the
+            // page should say so rather than drop it
+            $this->report_broken_entry('(no id)', (string)safe_get_value($source_params, 'url', ''),
+                'Empty id in configuration');
+            return;
+        }
+
+        $db = new SqlWrapper();
+        $db_path = "$this->working_dir/$source_id/$source_id.db";
+        if (file_exists($db_path)) {
+            $db->open_db($db_path);
+        }
+
+        $this->report->add($this->collect_stats($db, $source_id,
+            (string)safe_get_value($source_params, 'url', ''),
+            "$this->working_dir/$source_id/epg",
+            SourceStatus::NOT_RUN, '', 0.0));
+    }
+
+    /**
+     * Read back what this source currently serves.
+     *
+     * The counters are taken from the database and from the files on disk rather than
+     * from the run, so a source that was skipped as up-to-date reports the same numbers
+     * as one that was just converted.
+     *
+     * @param SqlWrapper $db
+     * @param string $source_id
+     * @param string $url
+     * @param string $json_path
+     * @param string $status
+     * @param string $error
+     * @param float $duration
+     * @return SourceReport
+     */
+    protected function collect_stats(SqlWrapper $db, string $source_id, string $url, string $json_path,
+                                     string     $status, string $error, float $duration): SourceReport
+    {
+        // a source that never got as far as creating its tables has nothing to report,
+        // and asking for them anyway would only put an error in the log
+        $params = [];
+        if ($db->is_open()
+            && $db->query_value("SELECT name FROM sqlite_master WHERE type='table' AND name='epg_params';")) {
+            foreach ($db->fetch_array('SELECT param, value FROM epg_params;') as $row) {
+                $params[$row['param']] = $row['value'];
+            }
+        }
+
+        // channels_info.json is the index of the directory, not a channel, so it adds to
+        // the size on disk but not to the number of guides served
+        $files = 0;
+        $files_size = 0;
+        if (is_dir($json_path)) {
+            foreach (new FilesystemIterator($json_path, FilesystemIterator::SKIP_DOTS) as $file) {
+                if (!$file->isFile() || $file->getExtension() !== 'json') continue;
+                $files_size += $file->getSize();
+                if ($file->getFilename() !== 'channels_info.json') {
+                    ++$files;
+                }
+            }
+        }
+
+        return new SourceReport(array(
+            'id' => $source_id,
+            'url' => $url,
+            'status' => $status,
+            'error' => $error,
+            'channels' => safe_get_value($params, 'channels'),
+            'picons' => safe_get_value($params, 'picons'),
+            'programmes' => safe_get_value($params, 'programmes'),
+            'files' => $files,
+            'files_size' => $files_size,
+            'epg_start' => safe_get_value($params, 'epg_start'),
+            'epg_end' => safe_get_value($params, 'epg_end'),
+            'last_update' => safe_get_value($params, 'last_update', safe_get_value($params, 'last_check', 0)),
+            'duration' => $duration,
+        ));
+    }
+
+    /**
+     * Where the info page goes, or null when it was not requested.
+     *
+     * @param array $converter_config
+     * @return string|null
+     */
+    protected function resolve_html_page(array $converter_config): ?string
+    {
+        $page = safe_get_value($converter_config, self::HTMLPAGE);
+        if ($page === null) {
+            return null;
+        }
+
+        // --html without a value, or pointing at a directory, names the file itself
+        if ($page === true || $page === '') {
+            return "$this->working_dir/" . self::HTMLPAGE_DEFAULT;
+        }
+
+        $page = (string)$page;
+        if (is_dir($page) || str_ends_with($page, '/') || str_ends_with($page, '\\')) {
+            return rtrim($page, '/\\') . '/' . self::HTMLPAGE_DEFAULT;
+        }
+
+        return $page;
     }
 
     /**
@@ -287,7 +475,7 @@ class Converter
      * @param SqlWrapper $db
      * @param string $url
      * @param string $filename
-     * @param int|false $manual_check
+     * @param int $manual_check
      * @param bool $force_processing
      * @return int
      */
@@ -298,7 +486,7 @@ class Converter
         Logger::log(Logger::Inf, "Begin download: $url");
 
         $last_check = $db->query_value("SELECT value FROM epg_params WHERE param='last_check';");
-        if (!$force_processing && $manual_check !== false && $last_check !== 0) {
+        if (!$force_processing && $last_check !== 0) {
             Logger::log(Logger::Dbg, "Last check: " . date('Y-m-d H:i:s', $last_check));
             $check_time = $last_check + $manual_check * 3600;
             if ($check_time > time()) {
@@ -444,13 +632,16 @@ class Converter
     }
 
     /**
-     * @param object $curl
+     * Left untyped on purpose: curl_init() hands back a resource before PHP 8.0 and a
+     * CurlHandle object from 8.0 on, so any type here breaks one of the two.
+     *
+     * @param CurlHandle $curl
      * @param string $header
      * @return int
      * @noinspection PhpUnused
      * @noinspection PhpUnusedParameterInspection
      */
-    public static function http_header_function(object $curl, string $header): int
+    public static function http_header_function(CurlHandle $curl, string $header): int
     {
         $len = strlen($header);
         $header = explode(':', $header, 2);
@@ -726,7 +917,7 @@ class Converter
                 // This attribute is read straight out of the raw text, while the channel
                 // table holds ids the XML parser already decoded. Without decoding here an
                 // id like "A&amp;E" never matches its channel and the whole channel is lost.
-                if (strpos($channel_id, '&') !== false) {
+                if (str_contains($channel_id, '&')) {
                     $channel_id = html_entity_decode($channel_id, ENT_QUOTES | ENT_XML1, 'UTF-8');
                 }
 
@@ -756,6 +947,12 @@ class Converter
 
             $total_epg = (int)$db->query_value('SELECT count(DISTINCT channel_id) FROM epg_entries;');
             $total_blocks = (int)$db->query_value('SELECT COUNT(*) FROM epg_entries;');
+
+            // kept for the info page, which is also drawn for sources that were skipped
+            // as up to date and so have nothing but the database to report from
+            $served = (int)$db->query_value('SELECT count(DISTINCT channel_id) FROM epg_channels;');
+            self::store_param($db, 'channels', $served);
+            self::store_param($db, 'picons', $picons);
 
             Logger::log(Logger::Inf, "Total known channels id's: $channels");
             Logger::log(Logger::Inf, "Total channels without information: $cnt");
@@ -811,6 +1008,9 @@ class Converter
         $channel_id = null;
         $picon_url = '';
         $item_str = '';
+        $programmes = 0;
+        $epg_start = 0;
+        $epg_end = 0;
 
         $flush = function () use (&$channel_id, &$picon_url, &$item_str, &$total, $json_path) {
             if ($channel_id === null || $item_str === '') {
@@ -907,6 +1107,16 @@ class Converter
                         $item_str .= ",\n";
                     }
                     $item_str .= json_encode($item, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
+
+                    // the span the source covers, collected here because every programme
+                    // is already decoded - a separate pass over it would not be free
+                    ++$programmes;
+                    if ($item['time'] > 0 && ($epg_start === 0 || $item['time'] < $epg_start)) {
+                        $epg_start = $item['time'];
+                    }
+                    if ($item['time_to'] > $epg_end) {
+                        $epg_end = $item['time_to'];
+                    }
                 }
             }
         }
@@ -921,8 +1131,14 @@ class Converter
             }
         }
 
+        self::store_param($db, 'programmes', $programmes);
+        self::store_param($db, 'epg_start', $epg_start);
+        self::store_param($db, 'epg_end', $epg_end);
+
         fclose($file);
         Logger::log(Logger::Inf, "Json files generated: $total from: $stored existing");
+        Logger::log(Logger::Inf, "Total programmes: $programmes"
+            . ($epg_start > 0 ? ", guide range: " . date('Y-m-d H:i', $epg_start) . ' - ' . date('Y-m-d H:i', $epg_end) : ''));
         Logger::log_separator();
 
         return true;
@@ -967,6 +1183,21 @@ class Converter
         }
 
         return $purged;
+    }
+
+    /**
+     * Remember a value in epg_params so a later run - or the info page after a run that
+     * downloaded nothing - can read it back.
+     *
+     * @param SqlWrapper $db
+     * @param string $param
+     * @param int|string $value
+     * @return void
+     */
+    protected static function store_param(SqlWrapper $db, string $param, int|string $value): void
+    {
+        $db->exec(sprintf('INSERT OR REPLACE INTO epg_params (param, value) VALUES (%s, %s);',
+            SqlWrapper::sql_quote($param), SqlWrapper::sql_quote((string)$value)));
     }
 
     protected function save_channels_info(SqlWrapper $db, string $json_path): void

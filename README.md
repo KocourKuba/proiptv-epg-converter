@@ -11,7 +11,7 @@ Unlike the ott-play/drm-play format, it supports most XMLTV tags. Uses its own a
 Downloading files with support for redirects (301/302) and the [Etag] header mechanism (https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/ETag). Both regular and gz/zip packed XMLTV files are supported.
 
 ### Requirements
-PHP CLI 7.4 or higher. PHP must be built with XML, zlib and sqlite3 support.
+PHP CLI 8.0 or higher. PHP must be built with XML, zlib and sqlite3 support.
 
 ### Command line arguments
 
@@ -26,11 +26,22 @@ PHP CLI 7.4 or higher. PHP must be built with XML, zlib and sqlite3 support.
     -f, --force,               Force processing."
     -l, --log=[log path],      Path to log file. If omitted log created in the same directory as configuration file."
     -s, --severity=[level],    Log level [error, warning, info, notice, debug]. Default is 'info'.
+    -w, --html[=file],         Generate an html information page when the conversion is finished.
+                               If the file is omitted, the page is saved as 'index.html' in the target directory.
 ```
 
 <details>
 <summary><b>Output results</b></summary>
 For example, our source is edem, and the EPG channel ID is '146'. The link to the TV program for the channel will look like this: http://your.server/edem/epg/146.json
+</details>
+
+<details>
+<summary><b>Information page</b></summary>
+With `-w` / `--html` a standalone HTML page is written when the run is finished. It has no external dependencies, so it can be served straight from the target directory.
+
+The page lists every processed source with its status (converted / up to date / failed), the number of channels and picons, the number of TV programs, the range the guide covers, the number and size of the generated json files, and the time the source took. Sources that were skipped as up-to-date report what they currently serve, taken from their database.
+
+Every source in the configuration gets a row, including the ones a `--run` left out - those are marked `not run` and still report what they currently serve. The numbers for each source come from its `<id>.db` and the files on disk, not from the run itself.
 </details>
 
 <details>
@@ -65,7 +76,7 @@ Processing xmltv from gabbarit (228Mb packed gz, size of unpacked xmltv 1.6Gb) -
 Скачивание файлов с поддержкой редиректов (301/302) и механизма заголовка [Etag](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/ETag). Поддерживаются как обычные, так и упакованные gz/zip XMLTV файлы.
 
 ### Требования
-PHP CLI 7.4 или выше. PHP должен быть собран с поддержкой XML, zlib и sqlite3.
+PHP CLI 8.0 или выше. PHP должен быть собран с поддержкой XML, zlib и sqlite3.
 
 ### Аргументы командной строки
 
@@ -80,10 +91,21 @@ PHP CLI 7.4 или выше. PHP должен быть собран с подд�
     -f, --force,               Принудительная обработка.
     -l, --log=[log path],      Путь и имя файла лога. Если не задан, то будет сохранятся в каталог в котором находится конфигурационный файл.
     -s, --severity=[level],    Уровень лога [error, warning, info, notice, debug]. По умолчанию - 'info'.
+    -w, --html[=file],         Создать html страницу с информацией о результатах конвертации.
+                               Если файл не задан, страница сохраняется как 'index.html' в корневом каталоге.
 ```
 <details>
 <summary><b>Результаты обработки</b></summary>
 Например, у нас источник edem, а EPG ID канала '146'. Ссылка на ТВ программу для канала будет выглядеть так:  http://your.server/edem/epg/146.json
+</details>
+
+<details>
+<summary><b>Информационная страница</b></summary>
+С параметром `-w` / `--html` по окончании работы создается html страница. Она не требует внешних библиотек, поэтому ее можно отдавать прямо из корневого каталога.
+
+На странице перечислены все обработанные источники с их статусом (converted / up to date / failed), количеством каналов и пиконов, количеством передач, периодом который покрывает телепрограмма, количеством и размером созданных json файлов и временем обработки. Источники пропущенные как актуальные показывают то, что они отдают сейчас - данные берутся из их базы.
+
+На странице присутствуют все источники из конфигурационного файла, в том числе не попавшие в текущий запуск из-за `--run` - они помечены как `not run` и показывают то, что отдают сейчас. Все цифры по источнику читаются из его `<id>.db` и файлов на диске, а не из результатов запуска.
 </details>
 
 <details>

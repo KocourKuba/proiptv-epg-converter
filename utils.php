@@ -40,7 +40,7 @@ function create_path($path): bool
  */
 function paved_path(string $path): string
 {
-    return substr($path, -1, 1) == '/' ? substr($path, 0, -1) : $path;
+    return str_ends_with($path, '/') ? substr($path, 0, -1) : $path;
 }
 
 /**
@@ -51,7 +51,7 @@ function paved_path(string $path): string
  */
 function is_proto_http(string $url): bool
 {
-    return strpos($url, 'http://') === 0 || strpos($url, 'https://') === 0;
+    return str_starts_with($url, 'http://') || str_starts_with($url, 'https://');
 }
 
 /**
@@ -62,7 +62,7 @@ function is_proto_http(string $url): bool
  * @param mixed $default
  * @return mixed
  */
-function safe_get_value($src, $param, $default = null)
+function safe_get_value(object|array $src, array|string $param, mixed $default = null): mixed
 {
     // No key to resolve. Null key or empty string is not allowed
     if (empty($param)) {
@@ -188,7 +188,7 @@ function extractZipArchive(string $archive): ?string
 }
 
 /**
- * Map a channel id onto the name its json file is stored under.
+ * Map a channel id onto the name its JSON file is stored under.
  *
  * Both the writer and the purger must agree on this, otherwise files that are perfectly
  * current look unknown to the purge pass and get deleted.
@@ -219,7 +219,7 @@ function escape_channel_filename(string $channel_id): string
  * Walking the child list once is what makes this cheap. Reaching for
  * getElementsByTagName() per field re-scans the subtree each time, and iterating the
  * returned live DOMNodeList is quadratic in the number of nodes, which dominates the
- * run time on channels that carry a lot of programmes.
+ * run time on channels that carry a lot of TV programs.
  *
  * @param DOMElement $tag
  * @return array

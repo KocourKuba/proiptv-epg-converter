@@ -93,11 +93,11 @@ class PerfCollector
      * if no start label set - used first label in array
      * if no end label set - used last label in array
      * @param string $item
-     * @param false|string $startLabel Start label
-     * @param false|string $endLabel End label
+     * @param bool|string $startLabel Start label
+     * @param bool|string $endLabel End label
      * @return mixed
      */
-    public function getReportItem(string $item, $startLabel = false, $endLabel = false)
+    public function getReportItem(string $item, bool|string $startLabel = false, bool|string $endLabel = false): mixed
     {
         if (empty($this->labels)) {
             return [];
@@ -111,10 +111,10 @@ class PerfCollector
     /**
      * Obtain a report array with the measures between two labels
      * @param bool|string $startLabel Start label
-     * @param false|string $endLabel End label
+     * @param bool|string $endLabel End label
      * @return array
      */
-    public function getFullReport($startLabel = false, $endLabel = false): array
+    public function getFullReport(bool|string $startLabel = false, bool|string $endLabel = false): array
     {
         if ($startLabel === false) {
             reset($this->labels);

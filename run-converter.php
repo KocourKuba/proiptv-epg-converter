@@ -27,8 +27,8 @@ require_once 'Converter.php';
 
 ini_set('memory_limit', '256M');
 
-$shortopts = "c:r:t:fpl:s:";
-$longopts = array('config:', 'run:', 'target:', 'force', 'purge', 'log:', 'severity:');
+$shortopts = "c:r:t:fpl:s:w::";
+$longopts = array('config:', 'run:', 'target:', 'force', 'purge', 'log:', 'severity:', 'html::');
 $options = getopt($shortopts, $longopts);
 $to_process = [];
 $log_path = '';
@@ -71,6 +71,12 @@ foreach ($options as $opt => $value) {
         case 'severity':
             $converter_config[Converter::SEVERITY] = $value;
             break;
+
+        case 'w':
+        case 'html':
+            // getopt hands back false for an optional value that was not given
+            $converter_config[Converter::HTMLPAGE] = ($value === false) ? true : $value;
+            break;
     }
 }
 
@@ -88,6 +94,8 @@ if (empty($converter_config['config_file'])) {
     echo "  -f, --force,               Force processing." . PHP_EOL;
     echo "  -l, --log=[log path],      Path to log file. If omitted log created in the same directory as configuration file" . PHP_EOL;
     echo "  -s, --severity=[level],    Log level [error, warning, info, notice, debug]. Default is 'info'" . PHP_EOL;
+    echo "  -w, --html[=file],         Generate html information page when conversion is finished." . PHP_EOL;
+    echo "                             If file omitted, page saved as 'index.html' in the target directory." . PHP_EOL;
     echo PHP_EOL;
     echo "Examples: " . PHP_EOL;
     echo "# process all sources from configuration file" . PHP_EOL;
@@ -104,6 +112,12 @@ if (empty($converter_config['config_file'])) {
     echo PHP_EOL;
     echo "#     store processing log to /var/log/epg" . PHP_EOL;
     echo "./$script_name --config=/var/www/epg/sources.conf --log=/var/log/epg.log" . PHP_EOL;
+    echo PHP_EOL;
+    echo "# write the information page to /var/www/epg/index.html" . PHP_EOL;
+    echo "./$script_name -c sources.conf -t /var/www/epg --html" . PHP_EOL;
+    echo PHP_EOL;
+    echo "# write the information page to a chosen file" . PHP_EOL;
+    echo "./$script_name -c sources.conf --html=/var/www/html/epg-status.html" . PHP_EOL;
     echo PHP_EOL;
     return;
 }

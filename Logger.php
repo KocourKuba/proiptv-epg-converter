@@ -38,7 +38,9 @@ class Logger
     const Err = 4;
     const Perm = 5;
 
+    /** @var string */
     protected static string $log_path = 'converter.log';
+    /** @var int */
     protected static int $severity = self::Inf;
     /** @var resource|null Held open so a debug run does not reopen the file per line. */
     protected static $handle = null;

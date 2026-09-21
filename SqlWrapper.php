@@ -46,6 +46,17 @@ class SqlWrapper
     }
 
     /**
+     * Whether open_db() succeeded. Callers that run after a failed open - the reporting
+     * pass, for one - would otherwise touch an uninitialized property.
+     *
+     * @return bool
+     */
+    public function is_open(): bool
+    {
+        return isset($this->db);
+    }
+
+    /**
      * quote value (val1 -> 'val1')
      * *
      * @param string $var
@@ -79,7 +90,7 @@ class SqlWrapper
      * Prepare bind based on query
      *
      * @param string $query
-     * @return SQLite3Stmt|false
+     * @return SQLite3Stmt
      */
     public function prepare(string $query): SQLite3Stmt
     {
@@ -94,7 +105,7 @@ class SqlWrapper
      * @param string $query
      * @return SQLite3Result|false
      */
-    public function query(string $query)
+    public function query(string $query): bool|SQLite3Result
     {
         if (empty($query)) {
             return false;
@@ -117,7 +128,7 @@ class SqlWrapper
      * @param bool $full_row
      * @return mixed
      */
-    public function query_value(string $query, bool $full_row = false)
+    public function query_value(string $query, bool $full_row = false): mixed
     {
         if (empty($query)) {
             return false;
