@@ -42,6 +42,10 @@ With `-w` / `--html` a standalone HTML page is written when the run is finished.
 The page lists every processed source with its status (converted / up to date / failed), the number of channels and picons, the number of TV programs, the range the guide covers, the number and size of the generated json files, and the time the source took. Sources that were skipped as up-to-date report what they currently serve, taken from their database.
 
 Every source in the configuration gets a row, including the ones a `--run` left out - those are marked `not run` and still report what they currently serve. The numbers for each source come from its `<id>.db` and the files on disk, not from the run itself.
+
+Each source also gets its own page at `<target>/<id>/index.html`, reached by clicking the source name on the index. It lists every channel the source serves with its picon, its EPG id, the display names it can also be reached by, the period its guide covers, how deep that guide goes, and the size of its JSON file, each id linking to its own guide. A channel whose guide is shorter than a day shows `<1 d`.
+
+A detail page is only written when it is missing or expired, since rendering one row per channel is the expensive part of a run for a source with thousands of them. A page counts as expired when the source was converted again after the page was written, or when the page is older than `Converter::DETAIL_TTL` (7 days by default). A source skipped as up to date, or left out by `--run`, keeps the page it already has.
 </details>
 
 <details>
@@ -106,6 +110,10 @@ PHP CLI 8.0 или выше. PHP должен быть собран с подд�
 На странице перечислены все обработанные источники с их статусом (converted / up to date / failed), количеством каналов и пиконов, количеством передач, периодом который покрывает телепрограмма, количеством и размером созданных json файлов и временем обработки. Источники пропущенные как актуальные показывают то, что они отдают сейчас - данные берутся из их базы.
 
 На странице присутствуют все источники из конфигурационного файла, в том числе не попавшие в текущий запуск из-за `--run` - они помечены как `not run` и показывают то, что отдают сейчас. Все цифры по источнику читаются из его `<id>.db` и файлов на диске, а не из результатов запуска.
+
+Для каждого источника также создается своя страница `<target>/<id>/index.html`, переход на нее - по имени источника на главной странице. На ней перечислены все каналы источника: пикон, EPG id, названия под которыми канал также доступен, период который покрывает его телепрограмма, ее глубина и размер его json файла. Каждый id ведет на телепрограмму этого канала. Канал с программой меньше суток показывается как `<1 d`.
+
+Страница источника перезаписывается только если она отсутствует или устарела - отрисовка строки на каждый канал это самая дорогая часть запуска для источника с тысячами каналов. Страница считается устаревшей если источник был сконвертирован после ее создания, либо если она старше `Converter::DETAIL_TTL` (по умолчанию 7 дней). Источник пропущенный как актуальный или не попавший в `--run` сохраняет уже созданную страницу.
 </details>
 
 <details>

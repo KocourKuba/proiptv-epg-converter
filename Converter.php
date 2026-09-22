@@ -24,6 +24,7 @@
  */
 
 require_once 'HtmlReport.php';
+require_once 'SourceDetail.php';
 require_once 'Logger.php';
 require_once 'PerfCollector.php';
 require_once 'SqlWrapper.php';
@@ -33,7 +34,10 @@ global $logger;
 
 class Converter
 {
-    const VERSION = '1.3';
+    /** File holding the version string, read from the directory this class lives in. */
+    const VERSION_FILE = 'VERSION';
+    /** Reported when the version file is missing or empty. */
+    const VERSION_UNKNOWN = 'unknown';
 
     const CONFIG = 'config_file';
     const RUN = 'run';
@@ -46,6 +50,14 @@ class Converter
 
     /** Name of the info page when --html is given without one. */
     const HTMLPAGE_DEFAULT = 'index.html';
+    /** Name of the per source detail page, written inside the source directory. */
+    const DETAIL_PAGE = 'index.html';
+    /**
+     * How long a detail page stays valid when nothing else marks it stales, in seconds.
+     * A converted source rewrites its page regardless, so this is only the backstop that
+     * catches a source whose last_update never moves - one configured purge_stalled: -1.
+     */
+    const DETAIL_TTL = 604800;
 
     /** Sent with every request - some hosts reject clients that identify as nothing. */
     const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
@@ -63,6 +75,40 @@ class Converter
     private int $download_size = 0;
     /** @var HtmlReport|null Collects per source statistics. Null when the info page was not requested. */
     private ?HtmlReport $report = null;
+    /** @var string Link from a detail page back to the index, or '' when there is none. */
+    private string $index_link = '';
+    /** @var float|null Seconds the last detail page took, null when it was not rebuilt. */
+    private ?float $last_detail_time = null;
+    /** @var float Seconds every detail page of this run took together. */
+    private float $detail_time = 0.0;
+
+    /**
+     * The converter version, taken from the VERSION file beside this class so it can be
+     * bumped without touching any code. Read once per run.
+     *
+     * @return string
+     */
+    public static function version(): string
+    {
+        static $version = null;
+        if ($version !== null) {
+            return $version;
+        }
+
+        $path = __DIR__ . DIRECTORY_SEPARATOR . self::VERSION_FILE;
+        if (!is_readable($path)) {
+            Logger::log(Logger::Wrn, "Version file not found: $path");
+            return $version = self::VERSION_UNKNOWN;
+        }
+
+        $raw = file_get_contents($path);
+        if ($raw === false || trim($raw) === '') {
+            Logger::log(Logger::Wrn, "Version file is empty or unreadable: $path");
+            return $version = self::VERSION_UNKNOWN;
+        }
+
+        return $version = trim($raw);
+    }
 
     /**
      * @return array
@@ -117,13 +163,19 @@ class Converter
 
         $sources = json_decode(file_get_contents($config_file), true);
 
-        Logger::log(Logger::Perm, 'ProIPTV EPG Converter v' . self::VERSION);
+        Logger::log(Logger::Perm, 'ProIPTV EPG Converter v' . self::version());
         Logger::log(Logger::Perm, 'Working directory: ' . $this->working_dir);
 
         $html_page = $this->resolve_html_page($converter_config);
         if ($html_page !== null) {
             Logger::log(Logger::Inf, "Info page: $html_page");
-            $this->report = new HtmlReport(self::VERSION);
+            $this->report = new HtmlReport(self::version());
+            // the detail pages can only point back at an index that sits at the root of
+            // the target directory, one level above them
+            $page_dir = str_replace('\\', '/', (string)pathinfo($html_page, PATHINFO_DIRNAME));
+            $this->index_link = ($page_dir === str_replace('\\', '/', $this->working_dir))
+                ? '../' . basename($html_page)
+                : '';
         }
 
         if (empty($sources)) {
@@ -174,15 +226,27 @@ class Converter
         $perf_all->setLabel('end');
         $report_all = $perf_all->getReportItem(PerfCollector::TIME, 'start', 'end');
 
+        $index_time = 0.0;
         if ($this->report !== null && $html_page !== null) {
+            $perf_all->setLabel('html_start');
             $this->report->set_run_time((float)$report_all);
             $this->report->save($html_page);
+            $perf_all->setLabel('html_end');
+
+            $index_time = (float)$perf_all->getReportItem(PerfCollector::TIME, 'html_start', 'html_end');
+            Logger::log(Logger::Inf, "Info page generation time: $index_time secs");
         }
 
         Logger::log(Logger::Perm, "Total downloaded: " . convert_bytes($this->download_size));
         Logger::log(Logger::Perm, "Total converted:  " . count($success) . " " . implode(',', $success));
         Logger::log(Logger::Perm, "Total skipped:    " . count($skipped) . " " . implode(',', $skipped));
         Logger::log(Logger::Perm, "Total failed:     " . count($failed) . " " . implode(',', $failed));
+        if ($this->report !== null) {
+            // the conversion total above does not include the pages, which are written
+            // after it is measured
+            Logger::log(Logger::Perm, "Total html time:  "
+                . round($this->detail_time + $index_time, 2) . " sec");
+        }
         Logger::log(Logger::Perm, "Total time:       $report_all sec");
         Logger::log_separator();
         Logger::close();
@@ -314,15 +378,20 @@ class Converter
         $report_convert = $perf->getReportItem(PerfCollector::TIME, 'convert_start', 'convert_end');
         $report_all = $perf->getReportItem(PerfCollector::TIME, 'start_item', 'end_item');
 
+        // collected before the timings are logged, so the detail page this may write is
+        // reported inside this source's block rather than after its separator
+        $this->report?->add($this->collect_stats($db, $source_id, $url, $json_path,
+            SourceStatus::from_result($ret), $error, (float)$report_all));
+
         Logger::log(Logger::Inf, "Download time: $report_download secs");
         Logger::log(Logger::Inf, "Uncompressing time: $report_uncompress secs");
         Logger::log(Logger::Inf, "Indexing XMLTV source time: $report_reindex secs");
         Logger::log(Logger::Inf, "Json generation time: $report_convert secs");
         Logger::log(Logger::Inf, "Source conversion time: $report_all secs");
+        if ($this->last_detail_time !== null) {
+            Logger::log(Logger::Inf, "Detail page generation time: $this->last_detail_time secs");
+        }
         Logger::log_separator();
-
-        $this->report?->add($this->collect_stats($db, $source_id, $url, $json_path,
-            SourceStatus::from_result($ret), $error, (float)$report_all));
 
         return $ret;
     }
@@ -378,6 +447,11 @@ class Converter
             (string)safe_get_value($source_params, 'url', ''),
             "$this->working_dir/$source_id/epg",
             SourceStatus::NOT_RUN, '', 0.0));
+
+        // a run that touches nothing still rebuilds any detail page that went missing
+        if ($this->last_detail_time !== null) {
+            Logger::log(Logger::Inf, "Detail page generation time for '$source_id': $this->last_detail_time secs");
+        }
     }
 
     /**
@@ -409,21 +483,27 @@ class Converter
             }
         }
 
+        // One pass over the directory serves both pages: the summary needs the count and
+        // the total, the detail page needs the size of each channel's file.
         // channels_info.json is the index of the directory, not a channel, so it adds to
         // the size on disk but not to the number of guides served
         $files = 0;
         $files_size = 0;
+        $files_index = [];
         if (is_dir($json_path)) {
             foreach (new FilesystemIterator($json_path, FilesystemIterator::SKIP_DOTS) as $file) {
                 if (!$file->isFile() || $file->getExtension() !== 'json') continue;
-                $files_size += $file->getSize();
-                if ($file->getFilename() !== 'channels_info.json') {
+                $size = (int)$file->getSize();
+                $files_size += $size;
+                $name = $file->getFilename();
+                if ($name !== 'channels_info.json') {
                     ++$files;
+                    $files_index[$name] = $size;
                 }
             }
         }
 
-        return new SourceReport(array(
+        $report = new SourceReport(array(
             'id' => $source_id,
             'url' => $url,
             'status' => $status,
@@ -438,6 +518,127 @@ class Converter
             'last_update' => safe_get_value($params, 'last_update', safe_get_value($params, 'last_check', 0)),
             'duration' => $duration,
         ));
+
+        $report->detail = $this->ensure_detail_page($db, $report, $files_index);
+
+        return $report;
+    }
+
+    /**
+     * Make sure the source has a current detail page, and say where it is.
+     *
+     * The page is only written when it is missing or expired, because rendering one row
+     * per channel is the expensive part of a run for a source with thousands of them.
+     *
+     * @param SqlWrapper $db
+     * @param SourceReport $summary
+     * @param array $files_index
+     * @return string Name of the page inside the source directory, or '' if there is none.
+     */
+    protected function ensure_detail_page(SqlWrapper $db, SourceReport $summary, array $files_index): string
+    {
+        $this->last_detail_time = null;
+
+        // nothing indexed yet - a source that has never been converted has nothing to show
+        if (!$db->is_open() || $summary->channels === 0) {
+            return '';
+        }
+
+        $path = "$this->working_dir/$summary->id/" . self::DETAIL_PAGE;
+
+        // a source converted in this run has by definition moved on, so its page is
+        // rewritten without consulting the timestamps
+        if ($summary->status !== SourceStatus::CONVERTED
+            && SourceDetail::is_current($path, $summary->last_update, self::DETAIL_TTL)) {
+            Logger::log(Logger::Dbg, "Detail page still current: $path");
+            return self::DETAIL_PAGE;
+        }
+
+        $perf = new PerfCollector();
+        $perf->reset('detail_start');
+
+        $channels = $this->load_channels($db, $files_index);
+        $page = new SourceDetail(self::version(), $summary->id, $summary, $channels, $this->index_link);
+        $saved = $page->save($path);
+
+        $perf->setLabel('detail_end');
+        $this->last_detail_time = (float)$perf->getReportItem(PerfCollector::TIME, 'detail_start', 'detail_end');
+        $this->detail_time += $this->last_detail_time;
+
+        return $saved ? self::DETAIL_PAGE : '';
+    }
+
+    /**
+     * Collect what the detail page lists: every channel with its display names, picon and
+     * the guide file it is served from.
+     *
+     * epg_channels holds one row per alias, so the rows are read in channel order and
+     * folded into one entry per channel as they stream past.
+     *
+     * @param SqlWrapper $db
+     * @param array $files_index
+     * @return array
+     */
+    protected function load_channels(SqlWrapper $db, array $files_index): array
+    {
+        // a database written by an older version has no ranges table - join it only when
+        // it is there, so those sources still list their channels, just without a depth
+        $has_ranges = (bool)$db->query_value(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='epg_ranges';");
+
+        $query = 'SELECT ch.channel_id, ch.alias_orig, pic.picon_url'
+            . ($has_ranges ? ', rng.first_ts, rng.last_ts' : '')
+            . ' FROM epg_channels AS ch LEFT JOIN epg_picons AS pic ON ch.picon_hash = pic.picon_hash'
+            . ($has_ranges ? ' LEFT JOIN epg_ranges AS rng ON rng.channel_id = ch.channel_id' : '')
+            . ' ORDER BY ch.channel_id, ch.alias_orig;';
+
+        $result = $db->query($query);
+        if ($result === false) {
+            return [];
+        }
+
+        $channels = [];
+        $current = null;
+        $entry = null;
+
+        while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
+            // channel_id is declared TEXT but sqlite reads it with NUMERIC affinity, so an
+            // id like "36.6" comes back as a float - force it back to text
+            $id = is_string($row['channel_id']) ? $row['channel_id'] : (string)$row['channel_id'];
+            if ($id !== $current) {
+                if ($entry !== null) {
+                    $channels[] = $entry;
+                }
+
+                $current = $id;
+                $file = escape_channel_filename($id) . '.json';
+                $known = isset($files_index[$file]);
+                $entry = array(
+                    'id' => $id,
+                    'names' => [],
+                    'picon' => '',
+                    'file' => $known ? $file : '',
+                    'size' => $known ? $files_index[$file] : 0,
+                    'first_ts' => (int)safe_get_value($row, 'first_ts', 0),
+                    'last_ts' => (int)safe_get_value($row, 'last_ts', 0),
+                );
+            }
+
+            if ($entry['picon'] === '' && !empty($row['picon_url'])) {
+                $entry['picon'] = (string)$row['picon_url'];
+            }
+
+            $alias = is_string($row['alias_orig']) ? $row['alias_orig'] : (string)$row['alias_orig'];
+            if ($alias !== '' && $alias !== $id && !in_array($alias, $entry['names'], true)) {
+                $entry['names'][] = $alias;
+            }
+        }
+
+        if ($entry !== null) {
+            $channels[] = $entry;
+        }
+
+        return $channels;
     }
 
     /**
@@ -1011,10 +1212,20 @@ class Converter
         $programmes = 0;
         $epg_start = 0;
         $epg_end = 0;
+        $ch_first = 0;
+        $ch_last = 0;
+        $ranges = [];
 
-        $flush = function () use (&$channel_id, &$picon_url, &$item_str, &$total, $json_path) {
+        $flush = function () use (&$channel_id, &$picon_url, &$item_str, &$total,
+                                 &$ch_first, &$ch_last, &$ranges, $json_path) {
             if ($channel_id === null || $item_str === '') {
                 return;
+            }
+
+            // the span this channel covers, kept for the detail page. Collected here
+            // because every programme of it has just been decoded anyway
+            if ($ch_first > 0) {
+                $ranges[$channel_id] = array($ch_first, $ch_last);
             }
 
             $str = '{' . PHP_EOL;
@@ -1046,6 +1257,8 @@ class Converter
                 $flush();
                 $channel_id = $row_id;
                 $item_str = '';
+                $ch_first = 0;
+                $ch_last = 0;
                 // a <programme> may name a channel that has no <channel> element - skip it,
                 // as driving the loop from epg_channels used to do
                 if (!isset($picons[$channel_id])) {
@@ -1111,11 +1324,19 @@ class Converter
                     // the span the source covers, collected here because every programme
                     // is already decoded - a separate pass over it would not be free
                     ++$programmes;
-                    if ($item['time'] > 0 && ($epg_start === 0 || $item['time'] < $epg_start)) {
-                        $epg_start = $item['time'];
+                    if ($item['time'] > 0) {
+                        if ($epg_start === 0 || $item['time'] < $epg_start) {
+                            $epg_start = $item['time'];
+                        }
+                        if ($ch_first === 0 || $item['time'] < $ch_first) {
+                            $ch_first = $item['time'];
+                        }
                     }
                     if ($item['time_to'] > $epg_end) {
                         $epg_end = $item['time_to'];
+                    }
+                    if ($item['time_to'] > $ch_last) {
+                        $ch_last = $item['time_to'];
                     }
                 }
             }
@@ -1130,6 +1351,27 @@ class Converter
                 }
             }
         }
+
+        // Written in one go after the pass rather than inside it: the loop is stepping a
+        // cursor over epg_entries, and this keeps the two off each other's toes.
+        $db->exec('DROP TABLE IF EXISTS epg_ranges;');
+        $db->exec('CREATE TABLE epg_ranges (channel_id TEXT NOT NULL PRIMARY KEY, first_ts INTEGER, last_ts INTEGER);');
+        $db->exec('BEGIN;');
+        $stm = $db->prepare('INSERT OR REPLACE INTO epg_ranges (channel_id, first_ts, last_ts) VALUES(:channel_id, :first_ts, :last_ts);');
+        /** @var string $range_id */
+        /** @var int $first_ts */
+        /** @var int $last_ts */
+        $stm->bindParam(':channel_id', $range_id);
+        $stm->bindParam(':first_ts', $first_ts);
+        $stm->bindParam(':last_ts', $last_ts);
+        foreach ($ranges as $range_id => $range) {
+            // a numeric looking id comes back from the array key as an int - make it text
+            $range_id = (string)$range_id;
+            $first_ts = $range[0];
+            $last_ts = $range[1];
+            $stm->execute();
+        }
+        $db->exec('COMMIT;');
 
         self::store_param($db, 'programmes', $programmes);
         self::store_param($db, 'epg_start', $epg_start);
