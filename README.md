@@ -28,6 +28,8 @@ PHP CLI 8.0 or higher. PHP must be built with XML, zlib and sqlite3 support.
     -s, --severity=[level],    Log level [error, warning, info, notice, debug]. Default is 'info'.
     -w, --html[=file],         Generate an html information page when the conversion is finished.
                                If the file is omitted, the page is saved as 'index.html' in the target directory.
+    -j, --json-links,          Link each channel on the source detail page to its json file.
+                               If omitted, the ids are shown as plain text.
 ```
 
 <details>
@@ -43,9 +45,11 @@ The page lists every processed source with its status (converted / up to date / 
 
 Every source in the configuration gets a row, including the ones a `--run` left out - those are marked `not run` and still report what they currently serve. The numbers for each source come from its `<id>.db` and the files on disk, not from the run itself.
 
-Each source also gets its own page at `<target>/<id>/index.html`, reached by clicking the source name on the index. It lists every channel the source serves with its picon, its EPG id, the display names it can also be reached by, the period its guide covers, how deep that guide goes, and the size of its JSON file, each id linking to its own guide. A channel whose guide is shorter than a day shows `<1 d`.
+Each source also gets its own page at `<target>/<id>/index.html`, reached by clicking the source name on the index. It lists every channel the source serves with its picon, its EPG id, the display names it can also be reached by, the period its guide covers, how deep that guide goes, and the size of its JSON file. A channel whose guide is shorter than a day shows `<1 d`.
 
-A detail page is only written when it is missing or expired, since rendering one row per channel is the expensive part of a run for a source with thousands of them. A page counts as expired when the source was converted again after the page was written, or when the page is older than `Converter::DETAIL_TTL` (7 days by default). A source skipped as up to date, or left out by `--run`, keeps the page it already has.
+With `-j` / `--json-links` each id on that page links to the guide it is served from, and the page points at `channels_info.json` as a link too. Without it - the default - the ids are plain text and the file names are only named, so a page served publicly does not advertise the files behind it. The guides themselves stay reachable by their url either way; the option only decides whether the page links to them.
+
+A detail page is only written when it is missing or expired. A page counts as expired when the source was converted again after the page was written, when the page is older than `Converter::DETAIL_TTL` (7 days by default), or when it was built with the other `--json-links` setting. A source skipped as up to date, or left out by `--run`, keeps the page it already has.
 </details>
 
 <details>
@@ -97,6 +101,8 @@ PHP CLI 8.0 или выше. PHP должен быть собран с подд�
     -s, --severity=[level],    Уровень лога [error, warning, info, notice, debug]. По умолчанию - 'info'.
     -w, --html[=file],         Создать html страницу с информацией о результатах конвертации.
                                Если файл не задан, страница сохраняется как 'index.html' в корневом каталоге.
+    -j, --json-links,          Делать id каждого канала на странице источника ссылкой на его json файл.
+                               Если не задан, id показываются обычным текстом.
 ```
 <details>
 <summary><b>Результаты обработки</b></summary>
@@ -111,9 +117,11 @@ PHP CLI 8.0 или выше. PHP должен быть собран с подд�
 
 На странице присутствуют все источники из конфигурационного файла, в том числе не попавшие в текущий запуск из-за `--run` - они помечены как `not run` и показывают то, что отдают сейчас. Все цифры по источнику читаются из его `<id>.db` и файлов на диске, а не из результатов запуска.
 
-Для каждого источника также создается своя страница `<target>/<id>/index.html`, переход на нее - по имени источника на главной странице. На ней перечислены все каналы источника: пикон, EPG id, названия под которыми канал также доступен, период который покрывает его телепрограмма, ее глубина и размер его json файла. Каждый id ведет на телепрограмму этого канала. Канал с программой меньше суток показывается как `<1 d`.
+Для каждого источника также создается своя страница `<target>/<id>/index.html`, переход на нее - по имени источника на главной странице. На ней перечислены все каналы источника: пикон, EPG id, псевдонимы, период, который покрывает его телепрограмма, ее глубина и размер его json файла. Канал с программой меньше суток показывается как `<1 d`.
 
-Страница источника перезаписывается только если она отсутствует или устарела - отрисовка строки на каждый канал это самая дорогая часть запуска для источника с тысячами каналов. Страница считается устаревшей если источник был сконвертирован после ее создания, либо если она старше `Converter::DETAIL_TTL` (по умолчанию 7 дней). Источник пропущенный как актуальный или не попавший в `--run` сохраняет уже созданную страницу.
+С параметром `-j` / `--json-links` каждый id на этой странице ведет на телепрограмму этого канала, а `channels_info.json` тоже становится ссылкой. Без него (поведение по умолчанию) id показываются обычным текстом, а имена файлов только упоминаются - чтобы страница, отдаваемая наружу, не публиковала ссылки на файлы. Сами телепрограммы в любом случае доступны по своим адресам, параметр влияет только на ссылки на странице.
+
+Страница источника перезаписывается только если она отсутствует или устарела. Страница считается устаревшей если источник был сконвертирован после ее создания, если она старше `Converter::DETAIL_TTL` (по умолчанию 7 дней), либо если она была создана с другим значением `--json-links`. Источник пропущенный как актуальный или не попавший в `--run` сохраняет уже созданную страницу.
 </details>
 
 <details>

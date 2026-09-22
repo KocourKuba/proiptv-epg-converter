@@ -27,8 +27,8 @@ require_once 'Converter.php';
 
 ini_set('memory_limit', '256M');
 
-$shortopts = "c:r:t:fpl:s:w::";
-$longopts = array('config:', 'run:', 'target:', 'force', 'purge', 'log:', 'severity:', 'html::');
+$shortopts = "c:r:t:fpl:s:w::j";
+$longopts = array('config:', 'run:', 'target:', 'force', 'purge', 'log:', 'severity:', 'html::', 'json-links');
 $options = getopt($shortopts, $longopts);
 $to_process = [];
 $log_path = '';
@@ -77,6 +77,11 @@ foreach ($options as $opt => $value) {
             // getopt hands back false for an optional value that was not given
             $converter_config[Converter::HTMLPAGE] = ($value === false) ? true : $value;
             break;
+
+        case 'j':
+        case 'json-links':
+            $converter_config[Converter::JSONLINKS] = true;
+            break;
     }
 }
 
@@ -96,6 +101,8 @@ if (empty($converter_config['config_file'])) {
     echo "  -s, --severity=[level],    Log level [error, warning, info, notice, debug]. Default is 'info'" . PHP_EOL;
     echo "  -w, --html[=file],         Generate html information page when conversion is finished." . PHP_EOL;
     echo "                             If file omitted, page saved as 'index.html' in the target directory." . PHP_EOL;
+    echo "  -j, --json-links,          Link each channel on the source detail page to its json file." . PHP_EOL;
+    echo "                             If omitted, the ids are shown as plain text." . PHP_EOL;
     echo PHP_EOL;
     echo "Examples: " . PHP_EOL;
     echo "# process all sources from configuration file" . PHP_EOL;
@@ -118,6 +125,9 @@ if (empty($converter_config['config_file'])) {
     echo PHP_EOL;
     echo "# write the information page to a chosen file" . PHP_EOL;
     echo "./$script_name -c sources.conf --html=/var/www/html/epg-status.html" . PHP_EOL;
+    echo PHP_EOL;
+    echo "# let the source pages link to the json guides they list" . PHP_EOL;
+    echo "./$script_name -c sources.conf -t /var/www/epg --html --json-links" . PHP_EOL;
     echo PHP_EOL;
     return;
 }

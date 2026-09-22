@@ -33,6 +33,9 @@ require_once 'ReportPage.php';
  */
 final class SourceDetail extends ReportPage
 {
+    /** Name of the head tag recording whether the page was built with json links. */
+    const LINKS_MARKER = 'epg-json-links';
+
     /** @var SourceReport */
     private SourceReport $summary;
     /**
@@ -41,6 +44,8 @@ final class SourceDetail extends ReportPage
     private array $channels;
     /** @var string */
     private string $index_link;
+    /** @var bool Whether the page links to the json files it describes. */
+    private bool $json_links;
 
     /**
      * @param string $version
@@ -48,29 +53,32 @@ final class SourceDetail extends ReportPage
      * @param SourceReport $summary
      * @param array $channels
      * @param string $index_link
+     * @param bool $json_links
      */
     public function __construct(string $version, string $source_id, SourceReport $summary,
-                                array  $channels, string $index_link = '')
+                                array  $channels, string $index_link = '', bool $json_links = false)
     {
         parent::__construct($version, $source_id);
         $this->summary = $summary;
         $this->channels = $channels;
         $this->index_link = $index_link;
+        $this->json_links = $json_links;
     }
 
     /**
      * Whether the page on disk still describes the current data.
      *
      * A page is current when it exists, was written after the last time the source was
-     * updated, and is not older than the time to live. Anything else counts as expired
-     * and the caller rebuilds it.
+     * updated, is not older than the time to live, and links its json files the way this
+     * run asks for. Anything else counts as expired and the caller rebuilds it.
      *
      * @param string $path
      * @param int $last_update
      * @param int $ttl Seconds, or 0 for no age limit.
+     * @param bool $json_links
      * @return bool
      */
-    public static function is_current(string $path, int $last_update, int $ttl): bool
+    public static function is_current(string $path, int $last_update, int $ttl, bool $json_links = false): bool
     {
         if (!is_file($path)) {
             return false;
@@ -86,7 +94,38 @@ final class SourceDetail extends ReportPage
             return false;
         }
 
+        // however fresh it is, a page built the other way shows the wrong links now
+        if (self::has_json_links($path) !== $json_links) {
+            return false;
+        }
+
         return $ttl <= 0 || (time() - $mtime) <= $ttl;
+    }
+
+    /**
+     * Whether the page on disk was built with links to the json files.
+     *
+     * The marker sits in the head, so the first block answers it - a page carrying
+     * thousands of rows is not worth reading whole for one tag. A page written before
+     * the marker existed has none, and counts as carrying no links.
+     *
+     * @param string $path
+     * @return bool
+     */
+    private static function has_json_links(string $path): bool
+    {
+        $head = file_get_contents($path, false, null, 0, 1024);
+
+        return $head !== false && str_contains($head, self::links_meta(true));
+    }
+
+    /**
+     * @param bool $json_links
+     * @return string
+     */
+    private static function links_meta(bool $json_links): string
+    {
+        return '<meta name="' . self::LINKS_MARKER . '" content="' . ($json_links ? 'on' : 'off') . '">';
     }
 
     ////////////////////////////////////////////////////////////
@@ -118,6 +157,14 @@ final class SourceDetail extends ReportPage
     protected function title_href(): string
     {
         return '';
+    }
+
+    /**
+     * @return string
+     */
+    protected function head_meta(): string
+    {
+        return self::links_meta($this->json_links);
     }
 
     /**
@@ -242,8 +289,7 @@ final class SourceDetail extends ReportPage
         $id = (string)safe_get_value($channel, 'id', '');
         $names = safe_get_value($channel, 'names', array());
         $picon = (string)safe_get_value($channel, 'picon', '');
-        //$file = (string)safe_get_value($channel, 'file', '');
-        $file = '';
+        $file = (string)safe_get_value($channel, 'file', '');
         $size = (int)safe_get_value($channel, 'size', 0);
 
         $row = '<tr data-key="' . self::e($id . ' ' . implode(' ', $names)) . '">' . PHP_EOL;
@@ -258,8 +304,10 @@ final class SourceDetail extends ReportPage
         // a channel without a picon leaves the cell empty - the column keeps its width
         $row .= '</td>' . PHP_EOL;
 
+        // the id is only a link when the run asked for one - a page served publicly has no
+        // reason to advertise the guide files it was built from
         $row .= '<td class="l">';
-        $row .= $file !== ''
+        $row .= ($this->json_links && $file !== '')
             ? '<a class="chan" href="./epg/' . rawurlencode($file) . '">' . self::e($id) . '</a>'
             : '<span class="chan">' . self::e($id) . '</span>';
         $row .= '</td>' . PHP_EOL;
@@ -314,9 +362,14 @@ final class SourceDetail extends ReportPage
         $html = '<section class="panel">' . PHP_EOL;
         $html .= '<div class="panel-head"><h2>How to use</h2></div>' . PHP_EOL;
         $html .= '<div class="usage">' . PHP_EOL;
-        $html .= '<p>Every channel above links to its own guide. The full list of ids this source '
-            . 'knows, with the names they can also be reached by, is in '
-            . '<a href="./epg/channels_info.json">channels_info.json</a>.</p>' . PHP_EOL;
+        $html .= $this->json_links
+            ? '<p>Every channel above links to its own guide. The full list of ids this source '
+                . 'knows, with the names they can also be reached by, is in '
+                . '<a href="./epg/channels_info.json">channels_info.json</a>.</p>' . PHP_EOL
+            : '<p>The guide of a channel above is the file <code>&lt;epg_id&gt;.json</code> in the '
+                . '<code>epg</code> folder beside this page. The full list of ids this source knows, '
+                . 'with the names they can also be reached by, is in '
+                . '<code>epg/channels_info.json</code>.</p>' . PHP_EOL;
         $html .= '</div></section>' . PHP_EOL;
 
         return $html;

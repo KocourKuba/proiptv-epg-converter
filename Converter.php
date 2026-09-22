@@ -47,6 +47,7 @@ class Converter
     const FORCE = 'force';
     const SEVERITY = 'severity';
     const HTMLPAGE = 'html_page';
+    const JSONLINKS = 'json_links';
 
     /** Name of the info page when --html is given without one. */
     const HTMLPAGE_DEFAULT = 'index.html';
@@ -77,6 +78,8 @@ class Converter
     private ?HtmlReport $report = null;
     /** @var string Link from a detail page back to the index, or '' when there is none. */
     private string $index_link = '';
+    /** @var bool Whether the detail pages link to the json files they list. */
+    private bool $json_links = false;
     /** @var float|null Seconds the last detail page took, null when it was not rebuilt. */
     private ?float $last_detail_time = null;
     /** @var float Seconds every detail page of this run took together. */
@@ -166,9 +169,12 @@ class Converter
         Logger::log(Logger::Perm, 'ProIPTV EPG Converter v' . self::version());
         Logger::log(Logger::Perm, 'Working directory: ' . $this->working_dir);
 
+        $this->json_links = isset($converter_config[self::JSONLINKS]);
+
         $html_page = $this->resolve_html_page($converter_config);
         if ($html_page !== null) {
             Logger::log(Logger::Inf, "Info page: $html_page");
+            Logger::log(Logger::Inf, 'Json links: ' . var_export($this->json_links, true));
             $this->report = new HtmlReport(self::version());
             // the detail pages can only point back at an index that sits at the root of
             // the target directory, one level above them
@@ -549,7 +555,7 @@ class Converter
         // a source converted in this run has by definition moved on, so its page is
         // rewritten without consulting the timestamps
         if ($summary->status !== SourceStatus::CONVERTED
-            && SourceDetail::is_current($path, $summary->last_update, self::DETAIL_TTL)) {
+            && SourceDetail::is_current($path, $summary->last_update, self::DETAIL_TTL, $this->json_links)) {
             Logger::log(Logger::Dbg, "Detail page still current: $path");
             return self::DETAIL_PAGE;
         }
@@ -558,7 +564,8 @@ class Converter
         $perf->reset('detail_start');
 
         $channels = $this->load_channels($db, $files_index);
-        $page = new SourceDetail(self::version(), $summary->id, $summary, $channels, $this->index_link);
+        $page = new SourceDetail(self::version(), $summary->id, $summary, $channels, $this->index_link,
+            $this->json_links);
         $saved = $page->save($path);
 
         $perf->setLabel('detail_end');

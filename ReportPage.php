@@ -106,6 +106,10 @@ abstract class ReportPage
         $html .= '<head>' . PHP_EOL;
         $html .= '<meta charset="utf-8">' . PHP_EOL;
         $html .= '<meta name="viewport" content="width=device-width, initial-scale=1">' . PHP_EOL;
+        $meta = $this->head_meta();
+        if ($meta !== '') {
+            $html .= $meta . PHP_EOL;
+        }
         $html .= '<title>' . self::e($this->title) . '</title>' . PHP_EOL;
         // a missing stylesheet is reported by css() - emit no empty <style> for it
         $css = self::css();
@@ -188,6 +192,17 @@ abstract class ReportPage
      * @return string
      */
     protected function crumb(): string
+    {
+        return '';
+    }
+
+    /**
+     * An extra tag for the head, already escaped, or '' for none. A page uses it to
+     * record how it was built, for a later run to read back.
+     *
+     * @return string
+     */
+    protected function head_meta(): string
     {
         return '';
     }
