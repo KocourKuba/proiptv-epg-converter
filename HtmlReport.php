@@ -277,7 +277,7 @@ final class HtmlReport extends ReportPage
             array('Programmes', 'r'),
             array('Files', 'r'),
             array('Size', 'r'),
-            array('Updated', 'l'),
+            array('Updated (GMT)', 'l'),
             array('Time', 'r'),
         );
 

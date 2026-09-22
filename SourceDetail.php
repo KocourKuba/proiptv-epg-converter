@@ -242,7 +242,8 @@ final class SourceDetail extends ReportPage
         $id = (string)safe_get_value($channel, 'id', '');
         $names = safe_get_value($channel, 'names', array());
         $picon = (string)safe_get_value($channel, 'picon', '');
-        $file = (string)safe_get_value($channel, 'file', '');
+        //$file = (string)safe_get_value($channel, 'file', '');
+        $file = '';
         $size = (int)safe_get_value($channel, 'size', 0);
 
         $row = '<tr data-key="' . self::e($id . ' ' . implode(' ', $names)) . '">' . PHP_EOL;

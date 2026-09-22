@@ -282,7 +282,7 @@ abstract class ReportPage
     /**
      * The stylesheet lives beside this class as a plain .css file, so it can be edited
      * and validated as one. It is inlined into the page rather than linked, which keeps
-     * the generated page a single self contained file.
+     * the generated page a single self-contained file.
      *
      * @return string
      */
