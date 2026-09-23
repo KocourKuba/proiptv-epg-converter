@@ -142,6 +142,8 @@ final class HtmlReport extends ReportPage
     private array $sources = array();
     /** @var float */
     private float $total_time = 0.0;
+    /** @var bool Whether the presets file is beside the page, and the page may link to it. */
+    private bool $presets_saved = false;
 
     /**
      * @param string $version
@@ -168,6 +170,15 @@ final class HtmlReport extends ReportPage
     public function set_run_time(float $total_time): void
     {
         $this->total_time = $total_time;
+    }
+
+    /**
+     * @param bool $saved Whether the presets file was written beside the page.
+     * @return void
+     */
+    public function set_presets_saved(bool $saved): void
+    {
+        $this->presets_saved = $saved;
     }
 
     /**
@@ -365,6 +376,11 @@ final class HtmlReport extends ReportPage
         $html .= '<p>The ids a source knows, along with the display names they can also be reached '
             . 'by, are listed in <code>channels_info.json</code>:</p>' . PHP_EOL;
         $html .= '<pre><code>' . self::e("http://your.server/$sample/epg/channels_info.json") . '</code></pre>' . PHP_EOL;
+        if ($this->presets_saved) {
+            $html .= '<p>The sources are ready to use as ProIPTV epg presets, one for each source, '
+                . 'named by its id - replace <code>http://your.server</code> in it with the address of this page: <a href="./' . Converter::PRESETS_FILE . '" download>'
+                . self::e(Converter::PRESETS_FILE) . '</a></p>' . PHP_EOL;
+        }
         $html .= '</div></section>' . PHP_EOL;
 
         return $html;

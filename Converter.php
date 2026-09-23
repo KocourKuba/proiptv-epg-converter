@@ -49,6 +49,13 @@ class Converter
     const HTMLPAGE = 'html_page';
     const JSONLINKS = 'json_links';
 
+    /** File with the ProIPTV epg presets, written on every run. */
+    const PRESETS_FILE = 'epg_presets.json';
+    /** Name of the preset, the one ProIPTV reads the channels_info.json of its sources for. */
+    const PRESET_NAME = 'proiptv';
+    /** Address of the target directory in the presets, replaced by the user with the real one. */
+    const PRESET_BASE_URL = 'http://your.server';
+
     /** Name of the info page when --html is given without one. */
     const HTMLPAGE_DEFAULT = 'index.html';
     /** Name of the per source detail page, written inside the source directory. */
@@ -232,10 +239,17 @@ class Converter
         $perf_all->setLabel('end');
         $report_all = $perf_all->getReportItem(PerfCollector::TIME, 'start', 'end');
 
+        // the presets go beside the info page, which links to them, or into the target
+        // directory when there is no page. They are written ahead of the page, which
+        // links to them only when they are there.
+        $presets_dir = $html_page === null ? $this->working_dir : pathinfo($html_page, PATHINFO_DIRNAME);
+        $presets_saved = $this->save_presets($sources, "$presets_dir/" . self::PRESETS_FILE);
+
         $index_time = 0.0;
         if ($this->report !== null && $html_page !== null) {
             $perf_all->setLabel('html_start');
             $this->report->set_run_time((float)$report_all);
+            $this->report->set_presets_saved($presets_saved);
             $this->report->save($html_page);
             $perf_all->setLabel('html_end');
 
@@ -647,6 +661,75 @@ class Converter
         }
 
         return $channels;
+    }
+
+    /**
+     * Write the epg presets for ProIPTV. It is the plugin's own epg_presets block: one
+     * preset whose aliases are the ids of the sources in the configuration, each of which
+     * the plugin offers as a preset of its own, "proiptv (<id>)".
+     *
+     * Only the sources that serve something are listed - a preset that points at an
+     * empty directory would give the plugin nothing but errors. What a source serves is
+     * read from its directory, so a source left out by --run is listed all the same.
+     *
+     * The server address is not known here - json_source carries a placeholder that
+     * the user replaces with the address the target directory is served from.
+     *
+     * @param array $sources
+     * @param string $path
+     * @return bool
+     */
+    protected function save_presets(array $sources, string $path): bool
+    {
+        $aliases = array();
+        foreach ($sources as $item) {
+            $source_id = (string)safe_get_value($item, 'id', '');
+            if ($source_id === '' || in_array($source_id, $aliases, true)) continue;
+
+            $json_path = "$this->working_dir/$source_id/epg";
+            if (!is_dir($json_path)) continue;
+
+            foreach (new FilesystemIterator($json_path, FilesystemIterator::SKIP_DOTS) as $file) {
+                if ($file->isFile() && $file->getExtension() === 'json' && $file->getFilename() !== 'channels_info.json') {
+                    $aliases[] = $source_id;
+                    break;
+                }
+            }
+        }
+
+        if (empty($aliases)) {
+            Logger::log(Logger::Inf, 'No source serves any guide, epg presets not written');
+            if (file_exists($path)) {
+                unlink($path);
+            }
+            return false;
+        }
+
+        $presets = array(
+            'epg_presets' => array(
+                self::PRESET_NAME => array(
+                    'aliases' => $aliases,
+                    'json_source' => self::PRESET_BASE_URL . '/{PROVIDER}/epg/{EPG_ID}.json',
+                    'parser' => array(
+                        'epg_root' => 'epg_data',
+                        'epg_name' => 'name',
+                        'epg_desc' => 'descr',
+                        'epg_start' => 'time',
+                        'epg_end' => 'time_to',
+                        'epg_icon' => 'icon',
+                    ),
+                ),
+            ),
+        );
+
+        $json = json_encode($presets, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if (!create_path(pathinfo($path, PATHINFO_DIRNAME)) || file_put_contents($path, $json, LOCK_EX) === false) {
+            Logger::log(Logger::Err, "Can't write epg presets: $path");
+            return false;
+        }
+
+        Logger::log(Logger::Inf, "Epg presets saved to: $path");
+        return true;
     }
 
     /**

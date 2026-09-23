@@ -50,6 +50,13 @@ Each source also gets its own page at `<target>/<id>/index.html`, reached by cli
 With `-j` / `--json-links` each id on that page links to the guide it is served from, and the page points at `channels_info.json` as a link too. Without it - the default - the ids are plain text and the file names are only named, so a page served publicly does not advertise the files behind it. The guides themselves stay reachable by their url either way; the option only decides whether the page links to them.
 
 A detail page is only written when it is missing or expired. A page counts as expired when the source was converted again after the page was written, when the page is older than `Converter::DETAIL_TTL` (7 days by default), or when it was built with the other `--json-links` setting. A source skipped as up to date, or left out by `--run`, keeps the page it already has.
+
+The page links to `epg_presets.json` for download from its "How to use" section - see below.
+</details>
+
+<details>
+<summary><b>EPG presets</b></summary>
+Every run writes `epg_presets.json` into the target directory - or next to the information page, when `--html` puts it elsewhere. It is a ready ProIPTV `epg_presets` block: a `proiptv` preset whose `aliases` are the ids of the sources from the configuration file that serve any guide, so the plugin offers each of them as `proiptv (<id>)`. Its `json_source` is `http://your.server/{PROVIDER}/epg/{EPG_ID}.json` - replace `http://your.server` with the address the target directory is served from, e.g. `http://epg.example.com/{PROVIDER}/epg/{EPG_ID}.json`. When no source serves anything, the file is not written.
 </details>
 
 <details>
@@ -122,6 +129,13 @@ PHP CLI 8.0 или выше. PHP должен быть собран с подд�
 С параметром `-j` / `--json-links` каждый id на этой странице ведет на телепрограмму этого канала, а `channels_info.json` тоже становится ссылкой. Без него (поведение по умолчанию) id показываются обычным текстом, а имена файлов только упоминаются - чтобы страница, отдаваемая наружу, не публиковала ссылки на файлы. Сами телепрограммы в любом случае доступны по своим адресам, параметр влияет только на ссылки на странице.
 
 Страница источника перезаписывается только если она отсутствует или устарела. Страница считается устаревшей если источник был сконвертирован после ее создания, если она старше `Converter::DETAIL_TTL` (по умолчанию 7 дней), либо если она была создана с другим значением `--json-links`. Источник пропущенный как актуальный или не попавший в `--run` сохраняет уже созданную страницу.
+
+На странице в разделе "How to use" есть ссылка на скачивание `epg_presets.json` - см. ниже.
+</details>
+
+<details>
+<summary><b>Пресеты EPG</b></summary>
+При каждом запуске в корневом каталоге создается файл `epg_presets.json` - либо рядом с информационной страницей, если `--html` сохраняет ее в другое место. Это готовый блок `epg_presets` для ProIPTV: пресет `proiptv`, в `aliases` которого перечислены id источников из конфигурационного файла, отдающих телепрограмму, - плагин показывает каждый из них как `proiptv (<id>)`. Адрес `json_source` задан как `http://your.server/{PROVIDER}/epg/{EPG_ID}.json` - замените `http://your.server` на адрес, по которому доступен корневой каталог, например `http://epg.example.com/{PROVIDER}/epg/{EPG_ID}.json`. Если ни один источник ничего не отдает, файл не создается.
 </details>
 
 <details>
