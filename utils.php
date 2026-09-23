@@ -128,8 +128,17 @@ function extractGzipFile(string $archive): ?string
     }
 
     $destination = pathinfo($archive, PATHINFO_DIRNAME);
+    // an archive without an extension would otherwise be unpacked onto itself,
+    // truncating it before a single byte is read
     $outfile = $destination . '/' . pathinfo($archive, PATHINFO_FILENAME);
+    if (pathinfo($archive, PATHINFO_EXTENSION) === '') {
+        $outfile = $archive . '.xml';
+    }
     $gzipped = gzopen($archive, "rb");
+    if ($gzipped === false) {
+        Logger::log(Logger::Err, 'Cannot open gzip file: ' . $archive);
+        return null;
+    }
     $file = fopen($outfile, "w");
 
     while ($string = gzread($gzipped, 4096*1000)) {

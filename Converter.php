@@ -290,7 +290,8 @@ class Converter
         $manual_check = safe_get_value($source_params, 'manual_check', false);
         $purge_stalled = safe_get_value($source_params, 'purge_stalled', 7);
 
-        $xmltv_source = "$this->working_dir/$source_id/" . basename($url);
+        // only a first guess - download() replaces it with the name the server announces
+        $xmltv_source = "$this->working_dir/$source_id/" . self::url_filename($url, "$source_id.xmltv");
 
         $db = new SqlWrapper();
         $db_path = "$this->working_dir/$source_id/$source_id.db";
@@ -680,6 +681,9 @@ class Converter
      * Return 1 in case success download
      * Return 2 in case file not changed or manual check not performed
      *
+     * On success $filename is updated to the name the file was actually saved under:
+     * the one sent in Content-Disposition, else the last name of the redirect chain.
+     *
      * @param SqlWrapper $db
      * @param string $url
      * @param string $filename
@@ -687,7 +691,7 @@ class Converter
      * @param bool $force_processing
      * @return int
      */
-    protected function download(SqlWrapper $db, string $url, string $filename, int $manual_check, bool $force_processing): int
+    protected function download(SqlWrapper $db, string $url, string &$filename, int $manual_check, bool $force_processing): int
     {
         self::$http_response_headers = [];
 
@@ -763,6 +767,11 @@ class Converter
             $error_no = curl_errno($ch);
             $error_desc = curl_error($ch);
             $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $effective_url = (string)curl_getinfo($ch, CURLINFO_EFFECTIVE_URL);
+            $redirects = (int)curl_getinfo($ch, CURLINFO_REDIRECT_COUNT);
+            if ($redirects > 0) {
+                Logger::log(Logger::Dbg, "Redirected $redirects time(s) to: $effective_url");
+            }
 
             if (!is_null($fp)) {
                 fclose($fp);
@@ -794,6 +803,8 @@ class Converter
             } else if (file_exists($tmp_file)) {
                 $download = filesize($tmp_file);
                 $this->download_size += $download;
+
+                $filename = self::resolve_download_name($filename, $url, $effective_url);
 
                 Logger::log(Logger::Inf,
                     sprintf('Save file: HTTP OK (%d, %d bytes) in %.3fs', $http_code, $download, $execution_tm));
@@ -852,6 +863,14 @@ class Converter
     public static function http_header_function(CurlHandle $curl, string $header): int
     {
         $len = strlen($header);
+        // With redirects followed, curl reports the headers of every response in the chain.
+        // A status line opens a new response, so only the final one's headers survive -
+        // otherwise an ETag or Content-Disposition of a redirect would be taken for the file's.
+        if (strncasecmp($header, 'HTTP/', 5) === 0) {
+            self::$http_response_headers = [];
+            return $len;
+        }
+
         $header = explode(':', $header, 2);
         if (count($header) == 2) {
             $header_name = trim($header[0]);
@@ -859,6 +878,94 @@ class Converter
             self::$http_response_headers[strtolower($header_name)] = $header_value;
         }
         return $len;
+    }
+
+    /**
+     * Pick the name a downloaded file is stored under, in order of trust:
+     * Content-Disposition of the final response, the last url of the redirect chain when
+     * it carries an extension, then the name guessed from the configured url.
+     *
+     * @param string $filename
+     * @param string $url
+     * @param string $effective_url
+     * @return string
+     */
+    protected static function resolve_download_name(string $filename, string $url, string $effective_url): string
+    {
+        $name = self::disposition_filename(self::get_response_header('content-disposition'));
+        if ($name !== '') {
+            Logger::log(Logger::Dbg, "Filename from Content-Disposition: $name");
+        } else if ($effective_url !== '' && $effective_url !== $url) {
+            $name = self::url_filename($effective_url, '');
+            if (pathinfo($name, PATHINFO_EXTENSION) === '') {
+                $name = '';
+            } else {
+                Logger::log(Logger::Dbg, "Filename from redirect url: $name");
+            }
+        }
+
+        if ($name === '') {
+            return $filename;
+        }
+
+        return pathinfo($filename, PATHINFO_DIRNAME) . '/' . $name;
+    }
+
+    /**
+     * Extract the file name from a Content-Disposition header value.
+     * RFC 6266: filename* (RFC 5987 encoded) takes precedence over plain filename.
+     *
+     * @param string $header
+     * @return string empty if the header names no usable file
+     */
+    protected static function disposition_filename(string $header): string
+    {
+        if ($header === '') {
+            return '';
+        }
+
+        $name = '';
+        if (preg_match("/filename\*\s*=\s*([^']*)'[^']*'([^;]+)/i", $header, $m)) {
+            $name = rawurldecode(trim($m[2], " \t\""));
+            if (strcasecmp($m[1], 'UTF-8') !== 0 && function_exists('mb_convert_encoding')) {
+                $name = mb_convert_encoding($name, 'UTF-8', $m[1] ?: 'ISO-8859-1');
+            }
+        } else if (preg_match('/filename\s*=\s*"((?:[^"\\\\]|\\\\.)*)"/i', $header, $m)) {
+            $name = stripslashes($m[1]);
+        } else if (preg_match('/filename\s*=\s*([^;]+)/i', $header, $m)) {
+            $name = trim($m[1]);
+        }
+
+        return self::safe_filename($name);
+    }
+
+    /**
+     * Last path segment of an url, without its query string or fragment.
+     *
+     * @param string $url
+     * @param string $default returned when the url has no usable file name
+     * @return string
+     */
+    protected static function url_filename(string $url, string $default): string
+    {
+        $path = (string)parse_url($url, PHP_URL_PATH);
+        $name = self::safe_filename(rawurldecode(basename($path)));
+        return $name === '' ? $default : $name;
+    }
+
+    /**
+     * Reduce a server supplied name to a plain file name that is safe on any filesystem.
+     *
+     * @param string $name
+     * @return string
+     */
+    protected static function safe_filename(string $name): string
+    {
+        // a name may carry a path (either separator) - never let it leave the source dir
+        $name = basename(str_replace('\\', '/', $name));
+        $name = preg_replace('/[\x00-\x1f<>:"\/\\\\|?*]/', '_', $name);
+        $name = trim($name, " .");
+        return ($name === '' || $name === '..') ? '' : $name;
     }
 
     /**
