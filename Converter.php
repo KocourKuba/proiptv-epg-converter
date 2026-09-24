@@ -53,8 +53,12 @@ class Converter
     const PRESETS_FILE = 'epg_presets.json';
     /** Name of the preset, the one ProIPTV reads the channels_info.json of its sources for. */
     const PRESET_NAME = 'proiptv';
-    /** Address of the target directory in the presets, replaced by the user with the real one. */
+    /** Address of the target directory in the presets, used when the configuration does not give one. */
     const PRESET_BASE_URL = 'http://your.server';
+    /** Configuration key holding the address the target directory is served from. */
+    const SERVER_BASE_URL = 'server_base_url';
+    /** Configuration key holding the list of xmltv sources. */
+    const SOURCES = 'sources';
 
     /** Name of the info page when --html is given without one. */
     const HTMLPAGE_DEFAULT = 'index.html';
@@ -91,6 +95,8 @@ class Converter
     private ?float $last_detail_time = null;
     /** @var float Seconds every detail page of this run took together. */
     private float $detail_time = 0.0;
+    /** @var string Address the target directory is served from, without a trailing slash. */
+    private string $base_url = self::PRESET_BASE_URL;
 
     /**
      * The converter version, taken from the VERSION file beside this class so it can be
@@ -171,10 +177,13 @@ class Converter
             Logger::setLogPath($converter_config[self::LOGFILE]);
         }
 
-        $sources = json_decode(file_get_contents($config_file), true);
+        $config = json_decode(file_get_contents($config_file), true);
 
         Logger::log(Logger::Perm, 'ProIPTV EPG Converter v' . self::version());
         Logger::log(Logger::Perm, 'Working directory: ' . $this->working_dir);
+
+        $sources = $this->read_config($config);
+        Logger::log(Logger::Inf, "Server address: $this->base_url");
 
         $this->json_links = isset($converter_config[self::JSONLINKS]);
 
@@ -183,6 +192,7 @@ class Converter
             Logger::log(Logger::Inf, "Info page: $html_page");
             Logger::log(Logger::Inf, 'Json links: ' . var_export($this->json_links, true));
             $this->report = new HtmlReport(self::version());
+            $this->report->set_base_url($this->base_url);
             // the detail pages can only point back at an index that sits at the root of
             // the target directory, one level above them
             $page_dir = str_replace('\\', '/', (string)pathinfo($html_page, PATHINFO_DIRNAME));
@@ -672,8 +682,8 @@ class Converter
      * empty directory would give the plugin nothing but errors. What a source serves is
      * read from its directory, so a source left out by --run is listed all the same.
      *
-     * The server address is not known here - json_source carries a placeholder that
-     * the user replaces with the address the target directory is served from.
+     * json_source points at the address given by 'server_base_url' in the configuration,
+     * or at a placeholder the user replaces when there is none.
      *
      * @param array $sources
      * @param string $path
@@ -709,7 +719,7 @@ class Converter
             'epg_presets' => array(
                 self::PRESET_NAME => array(
                     'aliases' => $aliases,
-                    'json_source' => self::PRESET_BASE_URL . '/{PROVIDER}/epg/{EPG_ID}.json',
+                    'json_source' => $this->base_url . '/{PROVIDER}/epg/{EPG_ID}.json',
                     'parser' => array(
                         'epg_root' => 'epg_data',
                         'epg_name' => 'name',
@@ -730,6 +740,44 @@ class Converter
 
         Logger::log(Logger::Inf, "Epg presets saved to: $path");
         return true;
+    }
+
+    /**
+     * Split the configuration into its settings and its sources. The configuration is an
+     * object that keeps the server address apart from the list of xmltv sources:
+     *
+     *   {
+     *     "server_base_url": "http://epg.example.com",
+     *     "sources": [ {"id": "edem", "url": "..."}, ... ]
+     *   }
+     *
+     * "server_base_url" is the address the target directory is served from. Without it the
+     * address stays the PRESET_BASE_URL placeholder. A configuration that is just the list
+     * of sources, the older format, is still read, with no address.
+     *
+     * @param mixed $config Decoded configuration file.
+     * @return array The sources.
+     */
+    protected function read_config($config): array
+    {
+        if (!is_array($config)) {
+            return array();
+        }
+
+        // a list is the older format, holding nothing but the sources
+        if (array_keys($config) === range(0, count($config) - 1)) {
+            return $config;
+        }
+
+        $url = rtrim(trim((string)safe_get_value($config, self::SERVER_BASE_URL, '')), '/');
+        if ($url === '') {
+            Logger::log(Logger::Wrn, "No '" . self::SERVER_BASE_URL . "' in configuration, placeholder used");
+        } else {
+            $this->base_url = $url;
+        }
+
+        $sources = safe_get_value($config, self::SOURCES, array());
+        return is_array($sources) ? array_values($sources) : array();
     }
 
     /**

@@ -56,7 +56,16 @@ The page links to `epg_presets.json` for download from its "How to use" section 
 
 <details>
 <summary><b>EPG presets</b></summary>
-Every run writes `epg_presets.json` into the target directory - or next to the information page, when `--html` puts it elsewhere. It is a ready ProIPTV `epg_presets` block: a `proiptv` preset whose `aliases` are the ids of the sources from the configuration file that serve any guide, so the plugin offers each of them as `proiptv (<id>)`. Its `json_source` is `http://your.server/{PROVIDER}/epg/{EPG_ID}.json` - replace `http://your.server` with the address the target directory is served from, e.g. `http://epg.example.com/{PROVIDER}/epg/{EPG_ID}.json`. When no source serves anything, the file is not written.
+Every run writes `epg_presets.json` into the target directory - or next to the information page, when `--html` puts it elsewhere. It is a ready ProIPTV `epg_presets` block: a `proiptv` preset whose `aliases` are the ids of the sources from the configuration file that serve any guide, so the plugin offers each of them as `proiptv (id)`. Its `json_source` is `{server}/{PROVIDER}/epg/{EPG_ID}.json`, where `{server}` is the address the target directory is served from. Set it with `server_base_url` in the configuration file, kept apart from the list of xmltv sources:
+```
+{
+  "server_base_url": "http://epg.example.com",
+  "sources": [
+    {"id": "edem", "url": "http://epg.my/epg.xml.gz"}
+  ]
+}
+```
+It also sets the addresses shown on the information page. Without it - or with a configuration that is just the list of sources, the older format - the placeholder `http://your.server` is written, to be replaced by hand. When no source serves anything, the file is not written.
 </details>
 
 <details>
@@ -135,7 +144,16 @@ PHP CLI 8.0 или выше. PHP должен быть собран с подд�
 
 <details>
 <summary><b>Пресеты EPG</b></summary>
-При каждом запуске в корневом каталоге создается файл `epg_presets.json` - либо рядом с информационной страницей, если `--html` сохраняет ее в другое место. Это готовый блок `epg_presets` для ProIPTV: пресет `proiptv`, в `aliases` которого перечислены id источников из конфигурационного файла, отдающих телепрограмму, - плагин показывает каждый из них как `proiptv (<id>)`. Адрес `json_source` задан как `http://your.server/{PROVIDER}/epg/{EPG_ID}.json` - замените `http://your.server` на адрес, по которому доступен корневой каталог, например `http://epg.example.com/{PROVIDER}/epg/{EPG_ID}.json`. Если ни один источник ничего не отдает, файл не создается.
+При каждом запуске в корневом каталоге создается файл `epg_presets.json` - либо рядом с информационной страницей, если `--html` сохраняет ее в другое место. Это готовый блок `epg_presets` для ProIPTV: пресет `proiptv`, в `aliases` которого перечислены id источников из конфигурационного файла, отдающих телепрограмму, - плагин показывает каждый из них как `proiptv (id)`. Адрес `json_source` задан как `{server}/{PROVIDER}/epg/{EPG_ID}.json`, где `{server}` - адрес, по которому доступен корневой каталог. Он задается параметром `server_base_url` в конфигурационном файле, отдельно от списка xmltv источников:
+```
+{
+  "server_base_url": "http://epg.example.com",
+  "sources": [
+    {"id": "edem", "url": "http://epg.my/epg.xml.gz"}
+  ]
+}
+```
+Он же задает адреса на информационной странице. Если его нет, либо конфигурация - просто список источников (старый формат), записывается заглушка `http://your.server`, которую нужно заменить вручную. Если ни один источник ничего не отдает, файл не создается.
 </details>
 
 <details>
