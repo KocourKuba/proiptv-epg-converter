@@ -168,6 +168,16 @@ final class SourceDetail extends ReportPage
     }
 
     /**
+     * The page sits in the directory of its source, one level below the icons folder.
+     *
+     * @return string
+     */
+    protected function icons_path(): string
+    {
+        return '../';
+    }
+
+    /**
      * @return string
      */
     protected function crumb(): string

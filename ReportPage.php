@@ -35,12 +35,30 @@ require_once 'utils.php';
  */
 abstract class ReportPage
 {
-    /** Stylesheet of the pages, read from the directory this class lives in. */
+    /** Folder of the stylesheet and the script, beside this class. */
+    const ASSETS_DIR = 'css';
+    /** Stylesheet of the pages, read from ASSETS_DIR. */
     const STYLESHEET = 'epg_report.css';
-    /** Script of the pages, read from the directory this class lives in. */
+    /** Script of the pages, read from ASSETS_DIR. */
     const SCRIPT = 'epg_report.js';
     /** Home of the converter, linked from the page title. */
     const PROJECT_URL = 'https://github.com/KocourKuba/proiptv-epg-converter';
+    /**
+     * Folder of the site icons, both beside this class and where the pages are served.
+     * Unlike the stylesheet the icons are not inlined - a browser fetches them by url -
+     * so copy_icons() puts them there.
+     */
+    const ICONS_DIR = 'favicon';
+    /** Files of the site icons, in ICONS_DIR. */
+    const ICONS = array(
+        'favicon.ico',
+        'favicon-16x16.png',
+        'favicon-32x32.png',
+        'apple-touch-icon.png',
+        'android-chrome-192x192.png',
+        'android-chrome-512x512.png',
+        'site.webmanifest',
+    );
 
     /** @var string */
     protected string $version;
@@ -111,6 +129,7 @@ abstract class ReportPage
             $html .= $meta . PHP_EOL;
         }
         $html .= '<title>' . self::e($this->title) . '</title>' . PHP_EOL;
+        $html .= $this->icon_links();
         // a missing stylesheet is reported by css() - emit no empty <style> for it
         $css = self::css();
         if ($css !== '') {
@@ -208,6 +227,16 @@ abstract class ReportPage
     }
 
     /**
+     * Where the folder of the site icons is, relative to the page: '' when it sits beside it.
+     *
+     * @return string
+     */
+    protected function icons_path(): string
+    {
+        return '';
+    }
+
+    /**
      * @return string
      */
     protected function footer_text(): string
@@ -295,9 +324,57 @@ abstract class ReportPage
     }
 
     /**
-     * The stylesheet lives beside this class as a plain .css file, so it can be edited
-     * and validated as one. It is inlined into the page rather than linked, which keeps
-     * the generated page a single self-contained file.
+     * Copy the site icons into the icons folder of a directory the pages are served from.
+     * A file is only copied when it is missing there or differs from the one beside this
+     * class, so a run that changes nothing does not rewrite them.
+     *
+     * @param string $dir
+     * @return void
+     */
+    public static function copy_icons(string $dir): void
+    {
+        $dir .= DIRECTORY_SEPARATOR . self::ICONS_DIR;
+        if (!create_path($dir)) {
+            Logger::log(Logger::Err, "Can't create directory for site icons: $dir");
+            return;
+        }
+
+        foreach (self::ICONS as $name) {
+            $src = __DIR__ . DIRECTORY_SEPARATOR . self::ICONS_DIR . DIRECTORY_SEPARATOR . $name;
+            $dst = $dir . DIRECTORY_SEPARATOR . $name;
+            if (!is_readable($src)) {
+                Logger::log(Logger::Wrn, "Site icon not found: $src");
+                continue;
+            }
+            if (file_exists($dst) && filesize($dst) === filesize($src) && md5_file($dst) === md5_file($src)) {
+                continue;
+            }
+            if (!copy($src, $dst)) {
+                Logger::log(Logger::Err, "Can't copy site icon to: $dst");
+            }
+        }
+    }
+
+    /**
+     * Head links to the site icons.
+     *
+     * @return string
+     */
+    private function icon_links(): string
+    {
+        $path = self::e($this->icons_path() . self::ICONS_DIR . '/');
+
+        return '<link rel="icon" href="' . $path . 'favicon.ico" sizes="any">' . PHP_EOL
+            . '<link rel="icon" type="image/png" sizes="32x32" href="' . $path . 'favicon-32x32.png">' . PHP_EOL
+            . '<link rel="icon" type="image/png" sizes="16x16" href="' . $path . 'favicon-16x16.png">' . PHP_EOL
+            . '<link rel="apple-touch-icon" sizes="180x180" href="' . $path . 'apple-touch-icon.png">' . PHP_EOL
+            . '<link rel="manifest" href="' . $path . 'site.webmanifest">' . PHP_EOL;
+    }
+
+    /**
+     * The stylesheet lives in the css folder beside this class as a plain .css file, so
+     * it can be edited and validated as one. It is inlined into the page rather than
+     * linked, which keeps the generated page a single self-contained file.
      *
      * @return string
      */
@@ -332,7 +409,7 @@ abstract class ReportPage
             return $cache[$name];
         }
 
-        $path = __DIR__ . DIRECTORY_SEPARATOR . $name;
+        $path = __DIR__ . DIRECTORY_SEPARATOR . self::ASSETS_DIR . DIRECTORY_SEPARATOR . $name;
         if (!is_readable($path)) {
             Logger::log(Logger::Wrn, "$what not found: $path. Pages $consequence.");
             return $cache[$name] = '';

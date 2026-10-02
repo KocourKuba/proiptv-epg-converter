@@ -199,6 +199,13 @@ class Converter
             $this->index_link = ($page_dir === str_replace('\\', '/', $this->working_dir))
                 ? '../' . basename($html_page)
                 : '';
+
+            // the source pages look for the icons in the target directory, the index page
+            // beside itself - the same place unless --html puts the index elsewhere
+            ReportPage::copy_icons($this->working_dir);
+            if ($this->index_link === '') {
+                ReportPage::copy_icons($page_dir);
+            }
         }
 
         if (empty($sources)) {
@@ -540,6 +547,7 @@ class Converter
             'status' => $status,
             'error' => $error,
             'channels' => safe_get_value($params, 'channels'),
+            'channels_total' => safe_get_value($params, 'channels_total'),
             'picons' => safe_get_value($params, 'picons'),
             'programmes' => safe_get_value($params, 'programmes'),
             'files' => $files,
@@ -1412,6 +1420,7 @@ class Converter
             // as up to date and so have nothing but the database to report from
             $served = (int)$db->query_value('SELECT count(DISTINCT channel_id) FROM epg_channels;');
             self::store_param($db, 'channels', $served);
+            self::store_param($db, 'channels_total', $channels);
             self::store_param($db, 'picons', $picons);
 
             Logger::log(Logger::Inf, "Total known channels id's: $channels");

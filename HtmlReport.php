@@ -84,8 +84,10 @@ final class SourceReport
     public string $status;
     /** @var string */
     public string $error;
-    /** @var int */
+    /** @var int Channels that have a guide, i.e. the ones the source serves. */
     public int $channels;
+    /** @var int Every channel the source lists, with a guide or not. 0 if not known. */
+    public int $channels_total;
     /** @var int */
     public int $picons;
     /** @var int */
@@ -118,6 +120,7 @@ final class SourceReport
         $this->status = (string)safe_get_value($params, 'status', SourceStatus::FAILED);
         $this->error = (string)safe_get_value($params, 'error', '');
         $this->channels = (int)safe_get_value($params, 'channels', 0);
+        $this->channels_total = (int)safe_get_value($params, 'channels_total', 0);
         $this->picons = (int)safe_get_value($params, 'picons', 0);
         $this->programmes = (int)safe_get_value($params, 'programmes', 0);
         $this->files = (int)safe_get_value($params, 'files', 0);
@@ -294,7 +297,7 @@ final class HtmlReport extends ReportPage
         $columns = array(
             array('Source', 'l'),
             array('Status', 'l'),
-            array('Channels', 'r'),
+            array('Channels (EPG)', 'r', 'found in the source (with programmes)'),
             array('Picons', 'r'),
             array('Programmes', 'r'),
             array('Files', 'r'),
@@ -311,7 +314,8 @@ final class HtmlReport extends ReportPage
 
         $html .= '<div class="scroll"><table id="sources"><thead><tr>';
         foreach ($columns as $index => $column) {
-            $html .= '<th class="' . $column[1] . '" data-col="' . $index . '" tabindex="0">'
+            $title = isset($column[2]) ? ' title="' . self::e($column[2]) . '"' : '';
+            $html .= '<th class="' . $column[1] . '" data-col="' . $index . '" tabindex="0"' . $title . '>'
                 . self::e($column[0]) . '</th>';
         }
         $html .= '</tr></thead><tbody>' . PHP_EOL;
@@ -358,7 +362,13 @@ final class HtmlReport extends ReportPage
         $row .= '<td class="l"><span class="badge ' . SourceStatus::css($source->status) . '">'
             . self::e($source->status) . '</span></td>' . PHP_EOL;
 
-        $row .= self::cell($source->channels, self::num($source->channels));
+        // found (with guide) - a source indexed before the total was kept has only the second
+        if ($source->channels_total > 0) {
+            $row .= self::cell($source->channels_total,
+                self::num($source->channels_total) . ' (' . self::num($source->channels) . ')');
+        } else {
+            $row .= self::cell($source->channels, self::num($source->channels));
+        }
         $row .= self::cell($source->picons, self::num($source->picons));
         $row .= self::cell($source->programmes, self::num($source->programmes));
 

@@ -1,3 +1,7 @@
+### Version 1.4.1
+- The "Channels (EPG)" column of the information page shows every channel found in the source and, in brackets, the channels that have programmes, e.g. `2100 (2000)`
+- The information pages have site icons (favicon, Apple touch icon, web manifest). They are copied into the `favicon` folder of the target directory together with the pages.
+
 ### Version 1.4
 - Each source gets its own page (`<target>/<id>/index.html`), opened by clicking the source name on the information page. It lists every channel of the source with its picon, EPG id, the display names it can also be found by, the period its guide covers, how deep that guide goes, and the size of its JSON file.
 - New option `-j, --json-links`: each channel id on the source page links to its JSON file. Off by default, so a page served publicly does not advertise the files behind it.

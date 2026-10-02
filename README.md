@@ -41,7 +41,7 @@ For example, our source is edem, and the EPG channel ID is '146'. The link to th
 <summary><b>Information page</b></summary>
 With `-w` / `--html` a standalone HTML page is written when the run is finished. It has no external dependencies, so it can be served straight from the target directory.
 
-The page lists every processed source with its status (converted / up to date / failed), the number of channels and picons, the number of TV programs, the range the guide covers, the number and size of the generated json files, and the time the source took. Sources that were skipped as up-to-date report what they currently serve, taken from their database.
+The page lists every processed source with its status (converted / up to date / failed), the number of channels found in the source with, in brackets, the ones that have TV programs (`2100 (2000)`), the number of picons, the number of TV programs, the range the guide covers, the number and size of the generated json files, and the time the source took. Sources that were skipped as up-to-date report what they currently serve, taken from their database.
 
 Every source in the configuration gets a row, including the ones a `--run` left out - those are marked `not run` and still report what they currently serve. The numbers for each source come from its `<id>.db` and the files on disk, not from the run itself.
 
@@ -50,6 +50,8 @@ Each source also gets its own page at `<target>/<id>/index.html`, reached by cli
 With `-j` / `--json-links` each id on that page links to the guide it is served from, and the page points at `channels_info.json` as a link too. Without it - the default - the ids are plain text and the file names are only named, so a page served publicly does not advertise the files behind it. The guides themselves stay reachable by their url either way; the option only decides whether the page links to them.
 
 A detail page is only written when it is missing or expired. A page counts as expired when the source was converted again after the page was written, when the page is older than `Converter::DETAIL_TTL` (7 days by default), or when it was built with the other `--json-links` setting. A source skipped as up to date, or left out by `--run`, keeps the page it already has.
+
+The site icons (`favicon.ico`, `favicon-*.png`, `apple-touch-icon.png`, `android-chrome-*.png`, `site.webmanifest`) are copied from the `favicon` folder of the converter into the `favicon` folder of the target directory - and next to the information page, when `--html` puts it elsewhere.
 
 The page links to `epg_presets.json` for download from its "How to use" section - see below.
 </details>
@@ -129,7 +131,7 @@ PHP CLI 8.0 или выше. PHP должен быть собран с подд�
 <summary><b>Информационная страница</b></summary>
 С параметром `-w` / `--html` по окончании работы создается html страница. Она не требует внешних библиотек, поэтому ее можно отдавать прямо из корневого каталога.
 
-На странице перечислены все обработанные источники с их статусом (converted / up to date / failed), количеством каналов и пиконов, количеством передач, периодом который покрывает телепрограмма, количеством и размером созданных json файлов и временем обработки. Источники пропущенные как актуальные показывают то, что они отдают сейчас - данные берутся из их базы.
+На странице перечислены все обработанные источники с их статусом (converted / up to date / failed), количеством каналов, найденных в источнике, и в скобках - каналов, у которых есть телепрограмма (`2100 (2000)`), количеством пиконов, количеством передач, периодом который покрывает телепрограмма, количеством и размером созданных json файлов и временем обработки. Источники пропущенные как актуальные показывают то, что они отдают сейчас - данные берутся из их базы.
 
 На странице присутствуют все источники из конфигурационного файла, в том числе не попавшие в текущий запуск из-за `--run` - они помечены как `not run` и показывают то, что отдают сейчас. Все цифры по источнику читаются из его `<id>.db` и файлов на диске, а не из результатов запуска.
 
@@ -138,6 +140,8 @@ PHP CLI 8.0 или выше. PHP должен быть собран с подд�
 С параметром `-j` / `--json-links` каждый id на этой странице ведет на телепрограмму этого канала, а `channels_info.json` тоже становится ссылкой. Без него (поведение по умолчанию) id показываются обычным текстом, а имена файлов только упоминаются - чтобы страница, отдаваемая наружу, не публиковала ссылки на файлы. Сами телепрограммы в любом случае доступны по своим адресам, параметр влияет только на ссылки на странице.
 
 Страница источника перезаписывается только если она отсутствует или устарела. Страница считается устаревшей если источник был сконвертирован после ее создания, если она старше `Converter::DETAIL_TTL` (по умолчанию 7 дней), либо если она была создана с другим значением `--json-links`. Источник пропущенный как актуальный или не попавший в `--run` сохраняет уже созданную страницу.
+
+Иконки сайта (`favicon.ico`, `favicon-*.png`, `apple-touch-icon.png`, `android-chrome-*.png`, `site.webmanifest`) копируются из папки `favicon` конвертера в папку `favicon` корневого каталога - и рядом с информационной страницей, если `--html` сохраняет ее в другое место.
 
 На странице в разделе "How to use" есть ссылка на скачивание `epg_presets.json` - см. ниже.
 </details>
