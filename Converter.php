@@ -758,7 +758,7 @@ class Converter
      * @param mixed $config Decoded configuration file.
      * @return array The sources.
      */
-    protected function read_config($config): array
+    protected function read_config(mixed $config): array
     {
         if (!is_array($config)) {
             return array();
@@ -1209,8 +1209,10 @@ class Converter
             $eof = false;
             $have_open = false;
             $scan_from = 0;
-            $open_tag = '<channel id';
-            $open_len = 11;     // strlen('<channel id')
+            // the id is not always the first attribute (<channel lang="en" id="...">),
+            // so only the tag name is matched and the attributes are left to the parser
+            $open_tag = '<channel';
+            $open_len = 8;      // strlen('<channel')
             $close_tag = '</channel>';
             $close_len = 10;    // strlen('</channel>')
 
@@ -1230,6 +1232,18 @@ class Converter
 
                     if ($open_pos > 0) {
                         $buffer = substr($buffer, $open_pos);
+                    }
+
+                    // the name must end right after '<channel', or '<channels>' would match too
+                    if (strlen($buffer) <= $open_len) {
+                        if ($eof) break;
+                        $chunk = fread($file, self::SCAN_BUFFER_SIZE);
+                        if ($chunk === false || $chunk === '') $eof = true; else $buffer .= $chunk;
+                        continue;
+                    }
+                    if (!str_contains(" \t\r\n>", $buffer[$open_len])) {
+                        $buffer = substr($buffer, $open_len);
+                        continue;
                     }
                     $have_open = true;
                     $scan_from = $open_len;
@@ -1611,6 +1625,7 @@ class Converter
         $stm->bindParam(':last_ts', $last_ts);
         foreach ($ranges as $range_id => $range) {
             // a numeric looking id comes back from the array key as an int - make it text
+            /** @noinspection PhpCastIsUnnecessaryInspection */
             $range_id = (string)$range_id;
             $first_ts = $range[0];
             $last_ts = $range[1];
