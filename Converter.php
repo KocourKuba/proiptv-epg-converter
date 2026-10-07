@@ -320,6 +320,12 @@ class Converter
         $keep_source = safe_get_value($source_params, 'keep_source', false);
         $manual_check = safe_get_value($source_params, 'manual_check', false);
         $purge_stalled = safe_get_value($source_params, 'purge_stalled', 7);
+        $verify_ssl = safe_get_value($source_params, 'verify_ssl', true);
+        if (!is_bool($verify_ssl)) {
+            Logger::log(Logger::Wrn, 'verify_ssl should be a JSON boolean (true/false), got: '
+                . var_export($verify_ssl, true));
+            $verify_ssl = filter_var($verify_ssl, FILTER_VALIDATE_BOOL);
+        }
 
         // only a first guess - download() replaces it with the name the server announces
         $xmltv_source = "$this->working_dir/$source_id/" . self::url_filename($url, "$source_id.xmltv");
@@ -342,9 +348,10 @@ class Converter
             Logger::log(Logger::Inf, "Source url: '$url'");
             Logger::log(Logger::Inf, "Keep source: " . var_export($keep_source, true));
             Logger::log(Logger::Inf, "Manual check: " . var_export($manual_check, true));
+            Logger::log(Logger::Inf, "Verify SSL: " . var_export($verify_ssl, true));
 
             $perf->setLabel('download_start');
-            $ret = $this->download($db, $url, $xmltv_source, $manual_check, $force_processing);
+            $ret = $this->download($db, $url, $xmltv_source, $manual_check, $force_processing, $verify_ssl);
             $perf->setLabel('download_end');
             if ($ret === 0) {
                 throw new Exception("Failed to download file");
@@ -828,9 +835,10 @@ class Converter
      * @param string $filename
      * @param int $manual_check
      * @param bool $force_processing
+     * @param bool $verify_ssl
      * @return int
      */
-    protected function download(SqlWrapper $db, string $url, string &$filename, int $manual_check, bool $force_processing): int
+    protected function download(SqlWrapper $db, string $url, string &$filename, int $manual_check, bool $force_processing, bool $verify_ssl = true): int
     {
         self::$http_response_headers = [];
 
@@ -852,8 +860,8 @@ class Converter
 
         $opts = [];
         $opts[CURLOPT_URL] = $url;
-        $opts[CURLOPT_SSL_VERIFYPEER] = 0;
-        $opts[CURLOPT_SSL_VERIFYHOST] = 0;
+        $opts[CURLOPT_SSL_VERIFYPEER] = $verify_ssl ? 1 : 0;
+        $opts[CURLOPT_SSL_VERIFYHOST] = $verify_ssl ? 2 : 0;
         $opts[CURLOPT_CONNECTTIMEOUT] = 30;
         // No overall deadline: a multi-gigabyte source on a slow link needs far more than
         // a fixed timeout. A stalled transfer is caught by the low-speed limit instead.
@@ -922,16 +930,21 @@ class Converter
                 Logger::log(Logger::Dbg, "$k: $v");
             }
 
+            if ($error_no !== 0) {
+                // certificate verification fails with errno 60 and HTTP code 0 - checked first,
+                // otherwise the generic status error below would mask the actual SSL problem
+                $hint = $error_no === 60
+                    ? "\nIf the server uses a self-signed or invalid certificate, set \"verify_ssl\": false for this source."
+                    : '';
+                $msg = sprintf('CURL errno: %s (%s); HTTP error: %s%s', $error_no, $error_desc, $http_code, $hint);
+                throw new Exception($msg);
+            }
+
             if ($http_code < 200 || ($http_code >= 300 && $http_code != 301 && $http_code != 304)) {
                 // the body went to $tmp_file, so curl_exec only returned a bool - show the
                 // start of what the server actually sent, which is what explains the failure
                 $body = file_exists($tmp_file) ? trim(file_get_contents($tmp_file, false, null, 0, 512)) : '';
                 throw new Exception("HTTP request failed ($http_code)\nHTTP response: $body");
-            }
-
-            if ($error_no !== 0) {
-                $msg = sprintf('CURL errno: %s (%s); HTTP error: %s', $error_no, $error_desc, $http_code);
-                throw new Exception($msg);
             }
 
             $ret = 0;

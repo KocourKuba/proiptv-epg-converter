@@ -1,3 +1,6 @@
+### Version 1.4.2
+- SSL certificate verification enabled by default. New source option `verify_ssl` (default: true) to disable for self-signed certificates.
+
 ### Version 1.4.1
 - The "Channels (EPG)" column of the information page shows every channel found in the source and, in brackets, the channels that have programmes, e.g. `2100 (2000)`
 - The information pages have site icons (favicon, Apple touch icon, web manifest). They are copied into the `favicon` folder of the target directory together with the pages.

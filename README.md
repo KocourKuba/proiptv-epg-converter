@@ -81,7 +81,8 @@ File format - JSON
 `url` - mandatory. Link to xmltv  
 `keep_source` - optional. If set to true, it saves the original downloaded file.  
 `manual_check` - optional. Sets the time for the next file download in hours. Necessary if the server does not support Etag, and the check is done frequently.  
-`purge_stalled` - optional. Sets the number of days after which files missing from the current source will be deleted. Default is 7 days.
+`purge_stalled` - optional. Sets the number of days after which files missing from the current source will be deleted. Default is 7 days.  
+`verify_ssl` - optional. Enable SSL certificate verification. Default is true. Set to false for self-signed certificates.
 </details>
 
 <details>
@@ -173,6 +174,7 @@ PHP CLI 8.0 или выше. PHP должен быть собран с подд�
 `keep_source` - необязательный. Если задан в true, то сохраняет оригинальный скачанный файл.  
 `manual_check` - необязательный. Задает время следующего скачивания файла в часах. Необходим если сервер не поддерживает Etag, а проверка делается часто.  
 `purge_stalled` - необязательный. Задает количество дней после которых файлы отстутсвующие в текущем источнике будут удалены. По умолчанию 7 дней.
+`verify_ssl` - необязательный. Включить проверку SSL сертификата. По умолчанию true. Установите false для самоподписанных сертификатов.
 </details>
 
 <details>
