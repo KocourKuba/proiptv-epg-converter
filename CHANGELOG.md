@@ -1,3 +1,10 @@
+### Version 1.6.1
+- A source with an empty id or url is counted as failed instead of skipped.
+- A source id that could make the paths built from it leave the working directory is rejected.
+- `--json-links` and the link from a source page back to the information page now work with the proc_open worker backend (Windows) as well.
+- A ZIP archive whose entries could write outside the source directory is rejected.
+- A source whose downloaded file cannot be opened is reported as failed instead of aborting the whole run.
+
 ### Version 1.6
 - New option `-m, --parallel=[N]`: process sources with up to N worker processes in parallel (default: 1 = sequential). On Linux the workers are forked processes (pcntl), everywhere else separate PHP processes are started, so no extra extension is required.
 - Each worker writes its own temporary log, which is merged into the main log as one contiguous block when the source finishes, so the messages of one source never interleave with those of another. After a successful conversion the temporary log is removed; a failed source keeps it and the main log points at it.
