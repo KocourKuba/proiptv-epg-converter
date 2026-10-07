@@ -131,7 +131,7 @@ final class WorkerPool
     {
         return function_exists('pcntl_fork')
             ? self::run_batch_fork($converter, $batch, $run_dir, $index, $options)
-            : self::run_batch_proc($converter, $batch, $run_dir, $index, $options);
+            : self::run_batch_proc($batch, $run_dir, $index, $options);
     }
 
     /**
@@ -143,6 +143,7 @@ final class WorkerPool
      * @param int $index
      * @param array $options
      * @return array
+     * @noinspection PhpComposerExtensionStubsInspection
      */
     private static function run_batch_fork(Converter $converter, array $batch, string $run_dir, int &$index, array $options): array
     {
@@ -196,14 +197,13 @@ final class WorkerPool
      * proc_open backend: one fresh PHP process per source, started through the
      * --worker entry point of run-converter.php.
      *
-     * @param Converter $converter
      * @param array $batch
      * @param string $run_dir
      * @param int $index
      * @param array $options
      * @return array
      */
-    private static function run_batch_proc(Converter $converter, array $batch, string $run_dir, int &$index, array $options): array
+    private static function run_batch_proc(array $batch, string $run_dir, int &$index, array $options): array
     {
         $procs = [];
         $results = [];
@@ -218,6 +218,8 @@ final class WorkerPool
                 'force' => (bool)$options['force'],
                 'purge' => (bool)$options['purge'],
                 'collect_report' => (bool)$options['collect_report'],
+                'json_links' => (bool)safe_get_value($options, 'json_links', false),
+                'index_link' => (string)safe_get_value($options, 'index_link', ''),
                 'source' => $source,
                 'result_file' => $result_file,
                 'session_log' => "$run_dir/log-$n.log",
@@ -251,12 +253,12 @@ final class WorkerPool
         $running = true;
         while ($running) {
             $running = false;
-            foreach ($procs as $n => &$info) {
+            foreach ($procs as &$info) {
                 $status = proc_get_status($info[0]);
                 if ($status['running']) {
                     $running = true;
                 }
-                $info[3] .= (string)stream_get_contents($info[2]);
+                $info[3] .= stream_get_contents($info[2]);
             }
             unset($info);
             if ($running) {
@@ -265,7 +267,7 @@ final class WorkerPool
         }
 
         foreach ($procs as $n => $info) {
-            $info[3] .= (string)stream_get_contents($info[2]);
+            $info[3] .= stream_get_contents($info[2]);
             stream_get_contents($info[1]);
             fclose($info[1]);
             fclose($info[2]);
@@ -299,7 +301,7 @@ final class WorkerPool
             $result = $converter->convert_detached($source, (bool)$options['force'], (bool)$options['purge']);
             self::write_result($result_file, $source_id, $result);
             Logger::merge_session_log($result['ret'] !== 0, $source_id);
-        } catch (Throwable $ex) {
+        } catch (Throwable) {
             self::write_result($result_file, $source_id, array('ret' => 0, 'bytes' => 0, 'report' => null, 'detail_time' => 0.0));
             Logger::merge_session_log(false, $source_id);
         }

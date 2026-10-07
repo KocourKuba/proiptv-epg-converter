@@ -179,9 +179,30 @@ function extractZipArchive(string $archive): ?string
         return null;
     }
 
+    // every entry is checked before extraction: a remote archive must not be able to
+    // write outside the source directory (zip slip) or make the caller open a file
+    // that does not sit inside it
+    $first_file = '';
+    for ($i = 0; $i < $unzip->numFiles; $i++) {
+        $name = (string)$unzip->getNameIndex($i);
+        if ($name === '') {
+            continue;
+        }
+        if (str_contains($name, '..')
+            || str_starts_with($name, '/')
+            || str_starts_with($name, '\\')
+            || preg_match('#^[A-Za-z]:#', $name)) {
+            $unzip->close();
+            Logger::log(Logger::Err, 'Unsafe entry in zip archive: ' . $name);
+            return null;
+        }
+        if ($first_file === '') {
+            $first_file = $name;
+        }
+    }
+
     // Check if zip is empty
-    $first_file = $unzip->getNameIndex(0);
-    if (empty($first_file)) {
+    if ($first_file === '') {
         $unzip->close();
         Logger::log(Logger::Err, 'Empty zip archive.');
         return null;

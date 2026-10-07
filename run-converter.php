@@ -132,7 +132,7 @@ if (empty($converter_config['config_file'])) {
     echo "./$script_name -c /var/www/epg/sources.conf" . PHP_EOL;
     echo PHP_EOL;
     echo "# change log level to 'debug'" . PHP_EOL;
-    echo "./$script_name --config=/var/www/epg/sources.conf -d debug" . PHP_EOL;
+    echo "./$script_name --config=/var/www/epg/sources.conf -s debug" . PHP_EOL;
     echo PHP_EOL;
     echo "# all epg files will be stored in /var/www/epg" . PHP_EOL;
     echo "./$script_name -c sources.conf -t /var/www/epg" . PHP_EOL;

@@ -175,12 +175,11 @@ class Converter
 
         if (empty($converter_config[self::LOGFILE])) {
             $log_path = "$this->working_dir/converter.log";
-            Logger::setLogPath($log_path);
         } else {
             $log_path = $converter_config[self::LOGFILE];
             create_path(pathinfo($log_path, PATHINFO_DIRNAME));
-            Logger::setLogPath($log_path);
         }
+        Logger::setLogPath($log_path);
 
         $config = json_decode(file_get_contents($config_file), true);
 
@@ -293,6 +292,8 @@ class Converter
                 'force' => $force_processing,
                 'purge' => $force_purge,
                 'collect_report' => $this->report !== null,
+                'json_links' => $this->json_links,
+                'index_link' => $this->index_link,
                 'script' => dirname(__DIR__) . '/run-converter.php',
             ), function (int $index, array $result) use (&$collected, &$success, &$failed, &$skipped, $work_keys) {
                 $collected[$work_keys[$index]] = $result;
@@ -362,10 +363,10 @@ class Converter
      * @param array $source_params
      * @param bool $force_processing
      * @param bool $force_purge
-     * @return array|int
+     * @return array ret: 0 failed, 1 success, 2 skipped; bytes: total
      *               downloaded this source, report: SourceReport|null, detail_time: float
      */
-    protected function convert_item(array $source_params, bool $force_processing, bool $force_purge)
+    protected function convert_item(array $source_params, bool $force_processing, bool $force_purge): array
     {
         $perf = new PerfCollector();
         $perf->reset('start_item');
@@ -378,14 +379,21 @@ class Converter
             // configuration holds an entry that cannot be processed
             $this->report_broken_entry('(no id)', (string)safe_get_value($source_params, 'url', ''),
                 'Empty id in configuration');
-            return 0;
+            return array('ret' => 0, 'bytes' => 0, 'report' => null, 'detail_time' => 0.0);
+        }
+
+        if (!self::is_safe_source_id($source_id)) {
+            Logger::log(Logger::Err, "Invalid source id: '$source_id'");
+            $this->report_broken_entry((string)$source_id, (string)safe_get_value($source_params, 'url', ''),
+                'Invalid id in configuration');
+            return array('ret' => 0, 'bytes' => 0, 'report' => null, 'detail_time' => 0.0);
         }
 
         $url = safe_get_value($source_params, 'url');
         if (empty($url)) {
             Logger::log(Logger::Err, 'Empty URL not allowed in sources.conf');
             $this->report_broken_entry($source_id, '', 'Empty url in configuration');
-            return 0;
+            return array('ret' => 0, 'bytes' => 0, 'report' => null, 'detail_time' => 0.0);
         }
 
         $keep_source = safe_get_value($source_params, 'keep_source', false);
@@ -501,9 +509,7 @@ class Converter
         if ($this->report !== null || $this->force_stats) {
             $report_item = $this->collect_stats($db, $source_id, $url, $json_path,
                 SourceStatus::from_result($ret), $error, (float)$report_all);
-            if ($this->report !== null) {
-                $this->report->add($report_item);
-            }
+            $this->report?->add($report_item);
         }
 
         Logger::log(Logger::Inf, "Download time: $report_download secs");
@@ -589,6 +595,8 @@ class Converter
         $converter = new self();
         $converter->working_dir = (string)safe_get_value($payload, 'working_dir', '');
         $converter->force_stats = (bool)safe_get_value($payload, 'collect_report', false);
+        $converter->json_links = (bool)safe_get_value($payload, self::JSONLINKS, false);
+        $converter->index_link = (string)safe_get_value($payload, 'index_link', '');
 
         $source = safe_get_value($payload, 'source', array());
         $result_file = (string)safe_get_value($payload, 'result_file', '');
@@ -645,6 +653,12 @@ class Converter
             // page should say so rather than drop it
             $this->report_broken_entry('(no id)', (string)safe_get_value($source_params, 'url', ''),
                 'Empty id in configuration');
+            return;
+        }
+
+        if (!self::is_safe_source_id($source_id)) {
+            $this->report_broken_entry((string)$source_id, (string)safe_get_value($source_params, 'url', ''),
+                'Invalid id in configuration');
             return;
         }
 
@@ -1289,6 +1303,21 @@ class Converter
     }
 
     /**
+     * An id names the source directory, so it must stay a single, plain path
+     * component - anything else could make the paths built from it leave the
+     * working directory.
+     *
+     * @param mixed $id
+     * @return bool
+     */
+    protected static function is_safe_source_id(mixed $id): bool
+    {
+        $id = (string)$id;
+        return $id !== '' && $id !== '.' && $id !== '..'
+            && !str_contains($id, '/') && !str_contains($id, '\\');
+    }
+
+    /**
      * @param string $filename
      * @return string|null
      */
@@ -1612,7 +1641,9 @@ class Converter
         } catch (Exception $ex) {
             Logger::log(Logger::Err, $ex->getMessage());
         } finally {
-            fclose($file);
+            if (is_resource($file)) {
+                fclose($file);
+            }
         }
 
         return $ret;
