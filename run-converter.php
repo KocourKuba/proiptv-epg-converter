@@ -29,8 +29,8 @@ require_once __DIR__ . '/autoload.php';
 
 ini_set('memory_limit', '256M');
 
-$shortopts = "c:r:t:fpl:s:w::j";
-$longopts = array('config:', 'run:', 'target:', 'force', 'purge', 'log:', 'severity:', 'html::', 'json-links');
+$shortopts = "c:r:t:fpl:s:w::jm:";
+$longopts = array('config:', 'run:', 'target:', 'force', 'purge', 'log:', 'severity:', 'html::', 'json-links', 'parallel:', 'worker:');
 $options = getopt($shortopts, $longopts);
 $to_process = [];
 $log_path = '';
@@ -84,7 +84,26 @@ foreach ($options as $opt => $value) {
         case 'json-links':
             $converter_config[Converter::JSONLINKS] = true;
             break;
+
+        case 'm':
+        case 'parallel':
+            $converter_config[Converter::PARALLEL] = $value;
+            break;
+
+        case 'worker':
+            $converter_config[Converter::WORKER] = $value;
+            break;
     }
+}
+
+// the worker mode of the parallel processing: convert exactly the one source carried
+// in the payload and stop. Used by the proc_open backend, not meant for direct use.
+if (isset($converter_config[Converter::WORKER])) {
+    $payload = json_decode(base64_decode($converter_config[Converter::WORKER]), true);
+    if (is_array($payload)) {
+        Converter::worker_convert($payload);
+    }
+    return;
 }
 
 if (empty($converter_config['config_file'])) {
@@ -105,6 +124,8 @@ if (empty($converter_config['config_file'])) {
     echo "                             If file omitted, page saved as 'index.html' in the target directory." . PHP_EOL;
     echo "  -j, --json-links,          Link each channel on the source detail page to its json file." . PHP_EOL;
     echo "                             If omitted, the ids are shown as plain text." . PHP_EOL;
+    echo "  -m, --parallel=[N],        Number of sources processed in parallel (default: 1)." . PHP_EOL;
+    echo "                             'auto' uses the number of CPU cores." . PHP_EOL;
     echo PHP_EOL;
     echo "Examples: " . PHP_EOL;
     echo "# process all sources from configuration file" . PHP_EOL;

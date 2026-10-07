@@ -46,11 +46,67 @@ class Logger
     protected static int $severity = self::Inf;
     /** @var resource|null Held open so a debug run does not reopen the file per line. */
     protected static $handle = null;
+    /** @var string|null Per-source temporary log, or null to write to the main log. */
+    protected static ?string $session_path = null;
 
     public static function setLogPath(string $log_path): void
     {
         self::close();
         self::$log_path = $log_path;
+    }
+
+    /**
+     * Redirect every following log line to a per-source temporary file. The main log is
+     * left alone until merge_session_log() appends the whole block to it.
+     *
+     * @param string $path
+     * @return void
+     */
+    public static function set_session_log(string $path): void
+    {
+        self::close();
+        self::$session_path = $path;
+    }
+
+    /**
+     * Append the session log to the main log as one contiguous block and go back to
+     * writing the main log. The block is written under an exclusive lock so the lines
+     * of one source can never interleave with those of another.
+     *
+     * After a successful conversion the temporary file is removed; after a failure it
+     * is kept and the main log points at it.
+     *
+     * @param bool $success
+     * @param string $source_id
+     * @return void
+     */
+    public static function merge_session_log(bool $success, string $source_id = ''): void
+    {
+        $session = self::$session_path;
+        self::close();
+        self::$session_path = null;
+
+        if ($session === null || !file_exists($session)) {
+            return;
+        }
+
+        $content = file_get_contents($session);
+        if ($content !== false && $content !== '') {
+            $fp = fopen(self::$log_path, 'a');
+            if ($fp !== false) {
+                flock($fp, LOCK_EX);
+                fwrite($fp, $content);
+                fflush($fp);
+                flock($fp, LOCK_UN);
+                fclose($fp);
+            }
+        }
+
+        if ($success) {
+            unlink($session);
+        } else {
+            self::log(self::Err, "Source '$source_id' failed, log kept at: $session");
+        }
     }
 
     /**
@@ -120,7 +176,8 @@ class Logger
         }
 
         if (self::$handle === null) {
-            $fp = fopen(self::$log_path, 'a');
+            $path = self::$session_path ?? self::$log_path;
+            $fp = fopen($path, 'a');
             if ($fp === false) {
                 return;
             }

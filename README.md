@@ -54,7 +54,11 @@ To run it automatically every 12 hours, add a cron job like:
                                If the file is omitted, the page is saved as 'index.html' in the target directory.
     -j, --json-links,          Link each channel on the source detail page to its json file.
                                If omitted, the ids are shown as plain text.
+    -m, --parallel=[N],        Number of sources processed in parallel (default: 1).
+                               'auto' uses the number of CPU cores.
 ```
+
+With `-m` / `--parallel` the sources are processed by up to N worker processes at once. On Linux the workers are forked processes (pcntl), everywhere else separate PHP processes are started, so no extra extension is required. Each worker runs a full conversion, so the peak memory usage is about N times that of a single source. Every worker writes its own temporary log, which is merged into the main log as one contiguous block when the source finishes; after a successful conversion it is removed, a failed source keeps it with a pointer line in the main log.
 
 <details>
 <summary><b>Output results</b></summary>
@@ -170,7 +174,12 @@ php run-converter.php -c sources.conf
                                Если файл не задан, страница сохраняется как 'index.html' в корневом каталоге.
     -j, --json-links,          Делать id каждого канала на странице источника ссылкой на его json файл.
                                Если не задан, id показываются обычным текстом.
+    -m, --parallel=[N],        Количество источников, обрабатываемых параллельно (по умолчанию: 1).
+                               'auto' использует число ядер процессора.
 ```
+
+С параметром `-m` / `--parallel` источники обрабатываются до N рабочими процессами одновременно. В Linux рабочие процессы создаются через fork (pcntl), в остальных системах запускаются отдельные PHP процессы, поэтому дополнительные расширения не требуются. Каждый рабочий процесс выполняет полную конвертацию, поэтому пиковый расход памяти примерно в N раз больше расхода одного источника. Каждый рабочий процесс пишет собственный временный лог, который по завершении источника добавляется в основной лог одним непрерывным блоком; после успешной конвертации он удаляется, неудачный источник сохраняет его со ссылкой в основном логе.
+
 <details>
 <summary><b>Результаты обработки</b></summary>
 Например, у нас источник edem, а EPG ID канала '146'. Ссылка на ТВ программу для канала будет выглядеть так: http://your.server/edem/epg/146.json

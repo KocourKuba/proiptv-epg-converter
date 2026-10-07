@@ -1,3 +1,7 @@
+### Version 1.6
+- New option `-m, --parallel=[N]`: process sources with up to N worker processes in parallel (default: 1 = sequential). On Linux the workers are forked processes (pcntl), everywhere else separate PHP processes are started, so no extra extension is required.
+- Each worker writes its own temporary log, which is merged into the main log as one contiguous block when the source finishes, so the messages of one source never interleave with those of another. After a successful conversion the temporary log is removed; a failed source keeps it and the main log points at it.
+
 ### Version 1.5
 - Refactored to PSR-4 autoloading (namespace `Proiptv\EpgConverter`, classes in `src/`). No behavior change. `composer install` is optional - without it a built-in autoloader is used.
 

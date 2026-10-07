@@ -29,6 +29,7 @@ use CurlHandle;
 use DOMDocument;
 use Exception;
 use FilesystemIterator;
+use Throwable;
 
 class Converter
 {
@@ -46,6 +47,8 @@ class Converter
     const SEVERITY = 'severity';
     const HTMLPAGE = 'html_page';
     const JSONLINKS = 'json_links';
+    const PARALLEL = 'parallel';
+    const WORKER = 'worker';
 
     /** File with the ProIPTV epg presets, written on every run. */
     const PRESETS_FILE = 'epg_presets.json';
@@ -95,6 +98,8 @@ class Converter
     private float $detail_time = 0.0;
     /** @var string Address the target directory is served from, without a trailing slash. */
     private string $base_url = self::PRESET_BASE_URL;
+    /** @var bool Collect stats even without an info page - a worker must, for its result file. */
+    private bool $force_stats = false;
 
     /**
      * The converter version, taken from the VERSION file in the project root so it can be
@@ -169,10 +174,12 @@ class Converter
         }
 
         if (empty($converter_config[self::LOGFILE])) {
-            Logger::setLogPath("$this->working_dir/converter.log");
+            $log_path = "$this->working_dir/converter.log";
+            Logger::setLogPath($log_path);
         } else {
-            create_path(pathinfo($converter_config[self::LOGFILE], PATHINFO_DIRNAME));
-            Logger::setLogPath($converter_config[self::LOGFILE]);
+            $log_path = $converter_config[self::LOGFILE];
+            create_path(pathinfo($log_path, PATHINFO_DIRNAME));
+            Logger::setLogPath($log_path);
         }
 
         $config = json_decode(file_get_contents($config_file), true);
@@ -226,28 +233,92 @@ class Converter
         $success = [];
         $failed = [];
         $skipped = [];
-        foreach ($sources as $item) {
-            // an entry with no id is rejected by convert_item, which reports why - read it
-            // without assuming it is there, since a missing key is a warning as of PHP 8.0
-            $item_id = (string)safe_get_value($item, 'id', '');
-            // --run holds strings and the id is cast to one, so a strict match is exact.
-            // It also keeps a JSON id given as a number (id: 146) out of the loose
-            // int-to-string comparison, whose rules changed in PHP 8.0.
-            if (!empty($converter_config[self::RUN]) && !in_array($item_id, $converter_config[self::RUN], true)) {
-                // the page covers the whole configuration, not just what this run touched
-                if ($this->report !== null) {
-                    $this->report_not_run($item);
+
+        $parallel = 1;
+        if (isset($converter_config[self::PARALLEL])) {
+            $value = strtolower(trim((string)$converter_config[self::PARALLEL]));
+            $parallel = $value === 'auto' ? WorkerPool::cpu_count() : max(1, (int)$value);
+        }
+
+        if ($parallel <= 1 || !WorkerPool::supported()) {
+            if ($parallel > 1) {
+                Logger::log(Logger::Wrn, 'No parallel processing support in this PHP, sources processed one after another');
+            }
+            foreach ($sources as $item) {
+                // an entry with no id is rejected by convert_item, which reports why - read it
+                // without assuming it is there, since a missing key is a warning as of PHP 8.0
+                $item_id = (string)safe_get_value($item, 'id', '');
+                // --run holds strings and the id is cast to one, so a strict match is exact.
+                // It also keeps a JSON id given as a number (id: 146) out of the loose
+                // int-to-string comparison, whose rules changed in PHP 8.0.
+                if (!empty($converter_config[self::RUN]) && !in_array($item_id, $converter_config[self::RUN], true)) {
+                    // the page covers the whole configuration, not just what this run touched
+                    if ($this->report !== null) {
+                        $this->report_not_run($item);
+                    }
+                    continue;
                 }
-                continue;
+
+                $ret = $this->convert_item($item, $force_processing, $force_purge)['ret'];
+                if ($ret === 0) {
+                    $failed[] = $item_id;
+                } else if ($ret === 1) {
+                    $success[] = $item_id;
+                } else {
+                    $skipped[] = $item_id;
+                }
+            }
+        } else {
+            Logger::log(Logger::Inf, "Process sources in parallel: up to $parallel workers (" . WorkerPool::backend_name() . ')');
+
+            // the workers convert only the sources this run touches; the rest are
+            // reported by the parent afterwards, in configuration order
+            $work = [];
+            $not_run = [];
+            foreach ($sources as $i => $item) {
+                $item_id = (string)safe_get_value($item, 'id', '');
+                if (!empty($converter_config[self::RUN]) && !in_array($item_id, $converter_config[self::RUN], true)) {
+                    $not_run[$i] = $item;
+                    continue;
+                }
+                $work[$i] = $item;
             }
 
-            $ret = $this->convert_item($item, $force_processing, $force_purge);
-            if ($ret === 0) {
-                $failed[] = $item_id;
-            } else if ($ret === 1) {
-                $success[] = $item_id;
-            } else {
-                $skipped[] = $item_id;
+            $work_keys = array_keys($work);
+            $collected = [];
+            WorkerPool::run($this, array_values($work), $parallel, array(
+                'working_dir' => $this->working_dir,
+                'log_file' => $log_path,
+                'severity' => (string)safe_get_value($converter_config, self::SEVERITY, ''),
+                'force' => $force_processing,
+                'purge' => $force_purge,
+                'collect_report' => $this->report !== null,
+                'script' => dirname(__DIR__) . '/run-converter.php',
+            ), function (int $index, array $result) use (&$collected, &$success, &$failed, &$skipped, $work_keys) {
+                $collected[$work_keys[$index]] = $result;
+                $this->download_size += (int)$result['bytes'];
+                $this->detail_time += (float)$result['detail_time'];
+                $item_id = (string)$result['id'];
+                $ret = (int)$result['ret'];
+                if ($ret === 0) {
+                    $failed[] = $item_id;
+                } else if ($ret === 1) {
+                    $success[] = $item_id;
+                } else {
+                    $skipped[] = $item_id;
+                }
+            });
+
+            // rebuild the page entries in configuration order - the workers collected
+            // the reports, the parent reports the sources this run left alone
+            if ($this->report !== null) {
+                foreach ($sources as $i => $item) {
+                    if (isset($not_run[$i])) {
+                        $this->report_not_run($item);
+                    } else if (isset($collected[$i]) && $collected[$i]['report'] instanceof SourceReport) {
+                        $this->report->add($collected[$i]['report']);
+                    }
+                }
             }
         }
 
@@ -291,12 +362,14 @@ class Converter
      * @param array $source_params
      * @param bool $force_processing
      * @param bool $force_purge
-     * @return int
+     * @return array|int
+     *               downloaded this source, report: SourceReport|null, detail_time: float
      */
-    protected function convert_item(array $source_params, bool $force_processing, bool $force_purge): int
+    protected function convert_item(array $source_params, bool $force_processing, bool $force_purge)
     {
         $perf = new PerfCollector();
         $perf->reset('start_item');
+        $bytes_before = $this->download_size;
 
         $source_id = safe_get_value($source_params, 'id');
         if (empty($source_id)) {
@@ -422,9 +495,16 @@ class Converter
         $report_all = $perf->getReportItem(PerfCollector::TIME, 'start_item', 'end_item');
 
         // collected before the timings are logged, so the detail page this may write is
-        // reported inside this source's block rather than after its separator
-        $this->report?->add($this->collect_stats($db, $source_id, $url, $json_path,
-            SourceStatus::from_result($ret), $error, (float)$report_all));
+        // reported inside this source's block rather than after its separator. A worker
+        // collects it for its result file even though it has no page of its own.
+        $report_item = null;
+        if ($this->report !== null || $this->force_stats) {
+            $report_item = $this->collect_stats($db, $source_id, $url, $json_path,
+                SourceStatus::from_result($ret), $error, (float)$report_all);
+            if ($this->report !== null) {
+                $this->report->add($report_item);
+            }
+        }
 
         Logger::log(Logger::Inf, "Download time: $report_download secs");
         Logger::log(Logger::Inf, "Uncompressing time: $report_uncompress secs");
@@ -436,7 +516,95 @@ class Converter
         }
         Logger::log_separator();
 
-        return $ret;
+        return array(
+            'ret' => $ret,
+            'bytes' => $this->download_size - $bytes_before,
+            'report' => $report_item,
+            'detail_time' => $this->last_detail_time ?? 0.0,
+        );
+    }
+
+    /**
+     * Drop the inherited info page in a forked worker: the child must not keep a copy
+     * of the report, but it still has to build one when the parent requested the page,
+     * since the result file carries it.
+     *
+     * @return void
+     */
+    public function detach_report(): void
+    {
+        $this->force_stats = $this->report !== null;
+        $this->report = null;
+    }
+
+    /**
+     * Convert one source without touching the report or its counters, so the caller
+     * can handle the result itself. Used when a worker has to run in the parent.
+     *
+     * @param array $source_params
+     * @param bool $force_processing
+     * @param bool $force_purge
+     * @return array
+     */
+    public function convert_detached(array $source_params, bool $force_processing, bool $force_purge): array
+    {
+        $saved_report = $this->report;
+        $saved_force = $this->force_stats;
+        $saved_detail_time = $this->detail_time;
+        $this->report = null;
+        $this->force_stats = $saved_report !== null || $saved_force;
+        try {
+            return $this->convert_item($source_params, $force_processing, $force_purge);
+        } finally {
+            $this->report = $saved_report;
+            $this->force_stats = $saved_force;
+            $this->detail_time = $saved_detail_time;
+        }
+    }
+
+    /**
+     * Entry point of a proc worker: one process converts exactly one source, writes
+     * its result file and merges its temporary log into the main log.
+     *
+     * @param array $payload
+     * @return void
+     */
+    public static function worker_convert(array $payload): void
+    {
+        $severity = (string)safe_get_value($payload, self::SEVERITY, '');
+        if ($severity !== '') {
+            Logger::setSeverity($severity);
+        }
+
+        $log_file = (string)safe_get_value($payload, self::LOGFILE, '');
+        if ($log_file !== '') {
+            Logger::setLogPath($log_file);
+        }
+
+        $session_log = (string)safe_get_value($payload, 'session_log', '');
+        if ($session_log !== '') {
+            Logger::set_session_log($session_log);
+        }
+
+        $converter = new self();
+        $converter->working_dir = (string)safe_get_value($payload, 'working_dir', '');
+        $converter->force_stats = (bool)safe_get_value($payload, 'collect_report', false);
+
+        $source = safe_get_value($payload, 'source', array());
+        $result_file = (string)safe_get_value($payload, 'result_file', '');
+        $source_id = (string)safe_get_value($source, 'id', '');
+
+        try {
+            $result = $converter->convert_item($source, (bool)safe_get_value($payload, self::FORCE, false),
+                (bool)safe_get_value($payload, self::PURGE, false));
+            WorkerPool::write_result($result_file, $source_id, $result);
+            Logger::merge_session_log($result['ret'] !== 0, $source_id);
+        } catch (Throwable $ex) {
+            Logger::log(Logger::Err, $ex->getMessage());
+            WorkerPool::write_result($result_file, $source_id,
+                array('ret' => 0, 'bytes' => 0, 'report' => null, 'detail_time' => 0.0));
+            Logger::merge_session_log(false, $source_id);
+        }
     }
 
     /**
@@ -870,7 +1038,9 @@ class Converter
         $opts[CURLOPT_FOLLOWLOCATION] = 1;
         $opts[CURLOPT_MAXREDIRS] = 5;
         $opts[CURLOPT_FILETIME] = 1;
-        $opts[CURLOPT_HEADERFUNCTION] = 'Converter::http_header_function';
+        // array callable so the namespaced class resolves whatever the calling context
+        // is - a bare 'Converter::http_header_function' string is looked up as global
+        $opts[CURLOPT_HEADERFUNCTION] = [self::class, 'http_header_function'];
         $opts[CURLOPT_ENCODING] = "";
         // Several sources sit behind a bot filter that answers a request without a
         // user agent with an HTML challenge page instead of the guide.
