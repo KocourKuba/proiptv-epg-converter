@@ -23,6 +23,8 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
+namespace Proiptv\EpgConverter;
+
 class PerfCollector
 {
     const TIME = 'Time';

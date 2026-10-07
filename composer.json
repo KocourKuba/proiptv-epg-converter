@@ -1,0 +1,25 @@
+{
+    "name": "kocourkuba/proiptv-epg-converter",
+    "description": "Fast XMLTV to JSON EPG converter for ProIPTV",
+    "type": "project",
+    "license": "MIT",
+    "require": {
+        "php": ">=8.0",
+        "ext-curl": "*",
+        "ext-dom": "*",
+        "ext-json": "*",
+        "ext-libxml": "*",
+        "ext-mbstring": "*",
+        "ext-sqlite3": "*",
+        "ext-xml": "*",
+        "ext-zlib": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "Proiptv\\EpgConverter\\": "src/"
+        },
+        "files": [
+            "src/functions.php"
+        ]
+    }
+}

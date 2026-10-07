@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 /**
  * The MIT License (MIT)
  *
@@ -23,7 +23,9 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-require_once 'Converter.php';
+use Proiptv\EpgConverter\Converter;
+
+require_once __DIR__ . '/autoload.php';
 
 ini_set('memory_limit', '256M');
 

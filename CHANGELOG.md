@@ -1,3 +1,6 @@
+### Version 1.5
+- Refactored to PSR-4 autoloading (namespace `Proiptv\EpgConverter`, classes in `src/`). No behavior change. `composer install` is optional - without it a built-in autoloader is used.
+
 ### Version 1.4.2
 - SSL certificate verification enabled by default. New source option `verify_ssl` (default: true) to disable for self-signed certificates.
 

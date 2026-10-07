@@ -1,7 +1,11 @@
 /.idea
 /*.json
 /*.log
+/vendor/
+/composer.phar
 /**/*.xml
 /**/*.gz
 /**/*.json
 /**/*.db
+
+!/composer.json

@@ -23,8 +23,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-require_once 'Logger.php';
-require_once 'utils.php';
+namespace Proiptv\EpgConverter;
 
 /**
  * Shared chrome of every generated page: the document around the content, the assets
@@ -35,7 +34,7 @@ require_once 'utils.php';
  */
 abstract class ReportPage
 {
-    /** Folder of the stylesheet and the script, beside this class. */
+    /** Folder of the stylesheet and the script, at the project root. */
     const ASSETS_DIR = 'css';
     /** Stylesheet of the pages, read from ASSETS_DIR. */
     const STYLESHEET = 'epg_report.css';
@@ -44,7 +43,7 @@ abstract class ReportPage
     /** Home of the converter, linked from the page title. */
     const PROJECT_URL = 'https://github.com/KocourKuba/proiptv-epg-converter';
     /**
-     * Folder of the site icons, both beside this class and where the pages are served.
+     * Folder of the site icons, both at the project root and where the pages are served.
      * Unlike the stylesheet the icons are not inlined - a browser fetches them by url -
      * so copy_icons() puts them there.
      */
@@ -340,7 +339,7 @@ abstract class ReportPage
         }
 
         foreach (self::ICONS as $name) {
-            $src = __DIR__ . DIRECTORY_SEPARATOR . self::ICONS_DIR . DIRECTORY_SEPARATOR . $name;
+            $src = dirname(__DIR__) . DIRECTORY_SEPARATOR . self::ICONS_DIR . DIRECTORY_SEPARATOR . $name;
             $dst = $dir . DIRECTORY_SEPARATOR . $name;
             if (!is_readable($src)) {
                 Logger::log(Logger::Wrn, "Site icon not found: $src");
@@ -372,7 +371,7 @@ abstract class ReportPage
     }
 
     /**
-     * The stylesheet lives in the css folder beside this class as a plain .css file, so
+     * The stylesheet lives in the css folder at the project root as a plain .css file, so
      * it can be edited and validated as one. It is inlined into the page rather than
      * linked, which keeps the generated page a single self-contained file.
      *
@@ -394,7 +393,7 @@ abstract class ReportPage
     }
 
     /**
-     * Read an asset that sits next to this class. Each one is read once per run, however
+     * Read an asset that sits at the project root. Each one is read once per run, however
      * many pages are generated.
      *
      * @param string $name
@@ -409,7 +408,7 @@ abstract class ReportPage
             return $cache[$name];
         }
 
-        $path = __DIR__ . DIRECTORY_SEPARATOR . self::ASSETS_DIR . DIRECTORY_SEPARATOR . $name;
+        $path = dirname(__DIR__) . DIRECTORY_SEPARATOR . self::ASSETS_DIR . DIRECTORY_SEPARATOR . $name;
         if (!is_readable($path)) {
             Logger::log(Logger::Wrn, "$what not found: $path. Pages $consequence.");
             return $cache[$name] = '';

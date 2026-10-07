@@ -23,7 +23,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-require_once 'ReportPage.php';
+namespace Proiptv\EpgConverter;
 
 /**
  * The per source page: everything one source serves, channel by channel.
@@ -168,7 +168,7 @@ final class SourceDetail extends ReportPage
     }
 
     /**
-     * The page sits in the directory of its source, one level below the icons folder.
+     * The page sits in the directory of its source, one level below the 'icons' folder.
      *
      * @return string
      */

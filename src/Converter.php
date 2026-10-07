@@ -23,18 +23,16 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-require_once 'HtmlReport.php';
-require_once 'SourceDetail.php';
-require_once 'Logger.php';
-require_once 'PerfCollector.php';
-require_once 'SqlWrapper.php';
-require_once 'utils.php';
+namespace Proiptv\EpgConverter;
 
-global $logger;
+use CurlHandle;
+use DOMDocument;
+use Exception;
+use FilesystemIterator;
 
 class Converter
 {
-    /** File holding the version string, read from the directory this class lives in. */
+    /** File holding the version string, read from the project root. */
     const VERSION_FILE = 'VERSION';
     /** Reported when the version file is missing or empty. */
     const VERSION_UNKNOWN = 'unknown';
@@ -99,7 +97,7 @@ class Converter
     private string $base_url = self::PRESET_BASE_URL;
 
     /**
-     * The converter version, taken from the VERSION file beside this class so it can be
+     * The converter version, taken from the VERSION file in the project root so it can be
      * bumped without touching any code. Read once per run.
      *
      * @return string
@@ -111,7 +109,7 @@ class Converter
             return $version;
         }
 
-        $path = __DIR__ . DIRECTORY_SEPARATOR . self::VERSION_FILE;
+        $path = dirname(__DIR__) . DIRECTORY_SEPARATOR . self::VERSION_FILE;
         if (!is_readable($path)) {
             Logger::log(Logger::Wrn, "Version file not found: $path");
             return $version = self::VERSION_UNKNOWN;

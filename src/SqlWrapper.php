@@ -23,7 +23,11 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-require_once 'Logger.php';
+namespace Proiptv\EpgConverter;
+
+use SQLite3;
+use SQLite3Result;
+use SQLite3Stmt;
 
 class SqlWrapper
 {

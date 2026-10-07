@@ -23,6 +23,8 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
+use Proiptv\EpgConverter\Logger;
+
 function create_path($path): bool
 {
     if (!is_dir($path)) {

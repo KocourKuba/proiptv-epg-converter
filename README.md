@@ -3,7 +3,7 @@
 A very fast XMLTV → JSON converter for creating an EPG program source for the [ProIPTV](https://github.com/KocourKuba/proiptv) plugin and [IPTV Channel Editor](https://github.com/KocourKuba/IptvChannelEditor).  
 Compatible with the format used by drm-play/ott-play.
 
-Creates JSON files containing a EPG TV program only for the specified EPG ID, which allows you to avoid downloading large XMLTV files and their subsequent processing on the client device. Can be easily configured on any web server or NAS.
+Creates JSON files containing an EPG TV program only for the specified EPG ID, which allows you to avoid downloading large XMLTV files and their subsequent processing on the client device. Can be easily configured on any web server or NAS.
 Does not require large amounts of RAM and fast CPU to execute the script.
 
 Unlike the ott-play/drm-play format, it supports most XMLTV tags. Uses its own algorithm, optimized for speed and memory consumption, to parse XMLTV, which is successfully used on Dune HD set-top boxes in the ProIPTV plugin.
@@ -11,7 +11,31 @@ Unlike the ott-play/drm-play format, it supports most XMLTV tags. Uses its own a
 Downloading files with support for redirects (301/302) and the [Etag] header mechanism (https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/ETag). Both regular and gz/zip packed XMLTV files are supported.
 
 ### Requirements
-PHP CLI 8.0 or higher. PHP must be built with XML, zlib and sqlite3 support.
+PHP CLI 8.0 or higher. PHP must be built with XML, mbstring, zlib and sqlite3 support.
+
+### Installation
+
+Clone the repository:
+```
+git clone https://github.com/KocourKuba/proiptv-epg-converter.git
+cd proiptv-epg-converter
+```
+That is all that is needed - the converter has no dependencies and uses its own autoloader.
+
+Optionally, install with [Composer](https://getcomposer.org/) so it manages the autoloading:
+```
+composer install
+```
+
+Run the converter with:
+```
+php run-converter.php -c sources.conf
+```
+
+To run it automatically every 12 hours, add a cron job like:
+```
+0 */12 * * * cd /path/to/proiptv-epg-converter && php run-converter.php -c /path/to/sources.conf
+```
 
 ### Command line arguments
 
@@ -41,7 +65,7 @@ For example, our source is edem, and the EPG channel ID is '146'. The link to th
 <summary><b>Information page</b></summary>
 With `-w` / `--html` a standalone HTML page is written when the run is finished. It has no external dependencies, so it can be served straight from the target directory.
 
-The page lists every processed source with its status (converted / up to date / failed), the number of channels found in the source with, in brackets, the ones that have TV programs (`2100 (2000)`), the number of picons, the number of TV programs, the range the guide covers, the number and size of the generated json files, and the time the source took. Sources that were skipped as up-to-date report what they currently serve, taken from their database.
+The page lists every processed source with its status (converted / up to date / failed), the number of channels found in the source with, in brackets, the ones that have TV programs (`2100 (2000)`), the number of picons, the number of TV programs, the range the guide covers, the number and size of the generated JSON files, and the time the source took. Sources that were skipped as up-to-date report what they currently serve, taken from their database.
 
 Every source in the configuration gets a row, including the ones a `--run` left out - those are marked `not run` and still report what they currently serve. The numbers for each source come from its `<id>.db` and the files on disk, not from the run itself.
 
@@ -103,7 +127,31 @@ Processing xmltv from gabbarit (228Mb packed gz, size of unpacked xmltv 1.6Gb) -
 Скачивание файлов с поддержкой редиректов (301/302) и механизма заголовка [Etag](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/ETag). Поддерживаются как обычные, так и упакованные gz/zip XMLTV файлы.
 
 ### Требования
-PHP CLI 8.0 или выше. PHP должен быть собран с поддержкой XML, zlib и sqlite3.
+PHP CLI 8.0 или выше. PHP должен быть собран с поддержкой XML, mbstring, zlib и sqlite3.
+
+### Установка
+
+Склонируйте репозиторий:
+```
+git clone https://github.com/KocourKuba/proiptv-epg-converter.git
+cd proiptv-epg-converter
+```
+Этого достаточно - конвертер не имеет зависимостей и использует собственный автозагрузчик.
+
+По желанию можно установить через [Composer](https://getcomposer.org/), чтобы автозагрузкой управлял он:
+```
+composer install
+```
+
+Запуск конвертера:
+```
+php run-converter.php -c sources.conf
+```
+
+Для автоматического запуска каждые 12 часов добавьте задание в cron, например:
+```
+0 */12 * * * cd /path/to/proiptv-epg-converter && php run-converter.php -c /path/to/sources.conf
+```
 
 ### Аргументы командной строки
 
@@ -125,7 +173,7 @@ PHP CLI 8.0 или выше. PHP должен быть собран с подд�
 ```
 <details>
 <summary><b>Результаты обработки</b></summary>
-Например, у нас источник edem, а EPG ID канала '146'. Ссылка на ТВ программу для канала будет выглядеть так:  http://your.server/edem/epg/146.json
+Например, у нас источник edem, а EPG ID канала '146'. Ссылка на ТВ программу для канала будет выглядеть так: http://your.server/edem/epg/146.json
 </details>
 
 <details>
@@ -149,7 +197,7 @@ PHP CLI 8.0 или выше. PHP должен быть собран с подд�
 
 <details>
 <summary><b>Пресеты EPG</b></summary>
-При каждом запуске в корневом каталоге создается файл `epg_presets.json` - либо рядом с информационной страницей, если `--html` сохраняет ее в другое место. Это готовый блок `epg_presets` для ProIPTV: пресет `proiptv`, в `aliases` которого перечислены id источников из конфигурационного файла, отдающих телепрограмму, - плагин показывает каждый из них как `proiptv (id)`. Адрес `json_source` задан как `{server}/{PROVIDER}/epg/{EPG_ID}.json`, где `{server}` - адрес, по которому доступен корневой каталог. Он задается параметром `server_base_url` в конфигурационном файле, отдельно от списка xmltv источников:
+При каждом запуске в корневом каталоге создается файл `epg_presets.json` - либо рядом с информационной страницей, если `--html` сохраняет ее в другое место. Это готовый блок `epg_presets` для ProIPTV: пресет `proiptv`, в `aliases` которого перечислены id источников из конфигурационного файла, отдающих телепрограмму - плагин показывает каждый из них как `proiptv (id)`. Адрес `json_source` задан как `{server}/{PROVIDER}/epg/{EPG_ID}.json`, где `{server}` - адрес, по которому доступен корневой каталог. Он задается параметром `server_base_url` в конфигурационном файле, отдельно от списка xmltv источников:
 ```
 {
   "server_base_url": "http://epg.example.com",
