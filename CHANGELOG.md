@@ -1,3 +1,6 @@
+### Version 1.6.2
+- The time column of the information page is split in two: "Download" shows how long fetching the source took, "Processing" how long unpacking, indexing and JSON generation took.
+
 ### Version 1.6.1
 - A source with an empty id or url is counted as failed instead of skipped.
 - A source id that could make the paths built from it leave the working directory is rejected.

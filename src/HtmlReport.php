@@ -195,7 +195,8 @@ final class HtmlReport extends ReportPage
             array('Files', 'r'),
             array('Size', 'r'),
             array('Updated (GMT)', 'l'),
-            array('Time', 'r'),
+            array('Download', 'r', 'time spent fetching the source'),
+            array('Processing', 'r', 'time spent unpacking, indexing and writing json'),
         );
 
         $html = '<section class="panel">' . PHP_EOL;
@@ -267,7 +268,8 @@ final class HtmlReport extends ReportPage
         $row .= self::cell($source->files, self::num($source->files));
         $row .= self::cell($source->files_size, convert_bytes($source->files_size));
         $row .= '<td class="l" data-v="' . $source->last_update . '">' . $updated . '</td>' . PHP_EOL;
-        $row .= self::cell((int)round($source->duration * 1000), self::duration($source->duration));
+        $row .= self::cell((int)round($source->download_time * 1000), self::duration($source->download_time));
+        $row .= self::cell((int)round($source->process_time * 1000), self::duration($source->process_time));
 
         $row .= '</tr>' . PHP_EOL;
 

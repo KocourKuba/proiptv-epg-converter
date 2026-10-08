@@ -59,8 +59,10 @@ final class SourceReport
     public int $epg_end;
     /** @var int */
     public int $last_update;
-    /** @var float */
-    public float $duration;
+    /** @var float Seconds spent fetching the source. */
+    public float $download_time;
+    /** @var float Seconds spent on everything after the download: unpacking, indexing, json. */
+    public float $process_time;
     /** @var string Detail page of this source, relative to its directory, or '' if none. */
     public string $detail = '';
 
@@ -85,7 +87,8 @@ final class SourceReport
         $this->epg_start = (int)safe_get_value($params, 'epg_start', 0);
         $this->epg_end = (int)safe_get_value($params, 'epg_end', 0);
         $this->last_update = (int)safe_get_value($params, 'last_update', 0);
-        $this->duration = (float)safe_get_value($params, 'duration', 0.0);
+        $this->download_time = (float)safe_get_value($params, 'download_time', 0.0);
+        $this->process_time = (float)safe_get_value($params, 'process_time', 0.0);
     }
 
 }

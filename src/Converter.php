@@ -508,7 +508,8 @@ class Converter
         $report_item = null;
         if ($this->report !== null || $this->force_stats) {
             $report_item = $this->collect_stats($db, $source_id, $url, $json_path,
-                SourceStatus::from_result($ret), $error, (float)$report_all);
+                SourceStatus::from_result($ret), $error, (float)$report_download,
+                max(0.0, (float)$report_all - (float)$report_download));
             $this->report?->add($report_item);
         }
 
@@ -671,7 +672,7 @@ class Converter
         $this->report->add($this->collect_stats($db, $source_id,
             (string)safe_get_value($source_params, 'url', ''),
             "$this->working_dir/$source_id/epg",
-            SourceStatus::NOT_RUN, '', 0.0));
+            SourceStatus::NOT_RUN, '', 0.0, 0.0));
 
         // a run that touches nothing still rebuilds any detail page that went missing
         if ($this->last_detail_time !== null) {
@@ -692,11 +693,13 @@ class Converter
      * @param string $json_path
      * @param string $status
      * @param string $error
-     * @param float $duration
+     * @param float $download_time
+     * @param float $process_time
      * @return SourceReport
      */
     protected function collect_stats(SqlWrapper $db, string $source_id, string $url, string $json_path,
-                                     string     $status, string $error, float $duration): SourceReport
+                                     string     $status, string $error, float $download_time,
+                                     float      $process_time): SourceReport
     {
         // a source that never got as far as creating its tables has nothing to report,
         // and asking for them anyway would only put an error in the log
@@ -742,7 +745,8 @@ class Converter
             'epg_start' => safe_get_value($params, 'epg_start'),
             'epg_end' => safe_get_value($params, 'epg_end'),
             'last_update' => safe_get_value($params, 'last_update', safe_get_value($params, 'last_check', 0)),
-            'duration' => $duration,
+            'download_time' => $download_time,
+            'process_time' => $process_time,
         ));
 
         $report->detail = $this->ensure_detail_page($db, $report, $files_index);
