@@ -109,8 +109,6 @@ final class WorkerPool
             }
         }
 
-        // successful workers removed their temporary logs themselves; a failed one
-        // keeps its log, so the directory is only removed when nothing is left
         foreach (glob("$run_dir/result-*.json") as $file) {
             unlink($file);
         }
@@ -169,7 +167,10 @@ final class WorkerPool
                 // file offset with the parent - release it and switch to a session log
                 Logger::close();
                 $converter->detach_report();
-                Logger::set_session_log("$run_dir/log-$n.log");
+                $session_log = self::session_log_path($options['working_dir'], $source);
+                if ($session_log !== null) {
+                    Logger::set_session_log($session_log);
+                }
                 self::run_worker($converter, $source, $result_file, $options);
                 exit(0);
             }
@@ -182,6 +183,10 @@ final class WorkerPool
             if ($pid > 0) {
                 unset($pids[$pid]);
             }
+        }
+
+        foreach ($batch as $source) {
+            self::merge_leftover_log($options['working_dir'], $source);
         }
 
         foreach ($files as $n => $result_file) {
@@ -222,7 +227,7 @@ final class WorkerPool
                 'index_link' => (string)safe_get_value($options, 'index_link', ''),
                 'source' => $source,
                 'result_file' => $result_file,
-                'session_log' => "$run_dir/log-$n.log",
+                'session_log' => (string)self::session_log_path($options['working_dir'], $source),
             );
 
             $command = array(
@@ -273,6 +278,11 @@ final class WorkerPool
             fclose($info[2]);
             proc_close($info[0]);
 
+            $pos = $n - ($index - count($batch));
+            if (isset($batch[$pos])) {
+                self::merge_leftover_log($options['working_dir'], $batch[$pos]);
+            }
+
             if ($info[3] !== '') {
                 Logger::log(Logger::Wrn, "Worker $n: " . trim($info[3]));
             }
@@ -300,10 +310,49 @@ final class WorkerPool
         try {
             $result = $converter->convert_detached($source, (bool)$options['force'], (bool)$options['purge']);
             self::write_result($result_file, $source_id, $result);
-            Logger::merge_session_log($result['ret'] !== 0, $source_id);
         } catch (Throwable) {
             self::write_result($result_file, $source_id, array('ret' => 0, 'bytes' => 0, 'report' => null, 'detail_time' => 0.0));
-            Logger::merge_session_log(false, $source_id);
+        }
+        Logger::merge_session_log();
+    }
+
+    /**
+     * Temporary log of a worker, kept in the directory of its source. A source whose
+     * id can not name a directory gets none - it is rejected before it logs more than
+     * a line, which then goes straight to the main log.
+     *
+     * @param string $working_dir
+     * @param array $source
+     * @return string|null
+     */
+    private static function session_log_path(string $working_dir, array $source): ?string
+    {
+        $source_id = safe_get_value($source, 'id', '');
+        if (!Converter::is_safe_source_id($source_id)) {
+            return null;
+        }
+
+        $dir = "$working_dir/$source_id";
+        if (!create_path($dir)) {
+            return null;
+        }
+
+        return "$dir/$source_id.log";
+    }
+
+    /**
+     * Merge the temporary log of a worker that died before merging it itself, so the
+     * main log still gets those lines and nothing is left behind.
+     *
+     * @param string $working_dir
+     * @param array $source
+     * @return void
+     */
+    private static function merge_leftover_log(string $working_dir, array $source): void
+    {
+        $source_id = safe_get_value($source, 'id', '');
+        if (Converter::is_safe_source_id($source_id)) {
+            Logger::merge_log_file("$working_dir/$source_id/$source_id.log");
         }
     }
 

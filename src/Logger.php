@@ -69,44 +69,51 @@ class Logger
     }
 
     /**
-     * Append the session log to the main log as one contiguous block and go back to
-     * writing the main log. The block is written under an exclusive lock so the lines
-     * of one source can never interleave with those of another.
+     * Append the session log to the main log and go back to writing the main log.
      *
-     * After a successful conversion the temporary file is removed; after a failure it
-     * is kept and the main log points at it.
-     *
-     * @param bool $success
-     * @param string $source_id
      * @return void
      */
-    public static function merge_session_log(bool $success, string $source_id = ''): void
+    public static function merge_session_log(): void
     {
         $session = self::$session_path;
         self::close();
         self::$session_path = null;
 
-        if ($session === null || !file_exists($session)) {
+        if ($session !== null) {
+            self::merge_log_file($session);
+        }
+    }
+
+    /**
+     * Append a temporary log to the main log as one contiguous block and remove it,
+     * whatever the outcome of the source - the main log then holds everything. The
+     * block is written under an exclusive lock so the lines of one source can never
+     * interleave with those of another.
+     *
+     * @param string $path
+     * @return void
+     */
+    public static function merge_log_file(string $path): void
+    {
+        if (!file_exists($path)) {
             return;
         }
 
-        $content = file_get_contents($session);
+        $content = file_get_contents($path);
         if ($content !== false && $content !== '') {
             $fp = fopen(self::$log_path, 'a');
-            if ($fp !== false) {
-                flock($fp, LOCK_EX);
-                fwrite($fp, $content);
-                fflush($fp);
-                flock($fp, LOCK_UN);
-                fclose($fp);
+            if ($fp === false) {
+                // the main log can't take it, so the temporary log is all there is
+                return;
             }
+            flock($fp, LOCK_EX);
+            fwrite($fp, $content);
+            fflush($fp);
+            flock($fp, LOCK_UN);
+            fclose($fp);
         }
 
-        if ($success) {
-            unlink($session);
-        } else {
-            self::log(self::Err, "Source '$source_id' failed, log kept at: $session");
-        }
+        unlink($path);
     }
 
     /**

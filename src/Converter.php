@@ -607,13 +607,12 @@ class Converter
             $result = $converter->convert_item($source, (bool)safe_get_value($payload, self::FORCE, false),
                 (bool)safe_get_value($payload, self::PURGE, false));
             WorkerPool::write_result($result_file, $source_id, $result);
-            Logger::merge_session_log($result['ret'] !== 0, $source_id);
         } catch (Throwable $ex) {
             Logger::log(Logger::Err, $ex->getMessage());
             WorkerPool::write_result($result_file, $source_id,
                 array('ret' => 0, 'bytes' => 0, 'report' => null, 'detail_time' => 0.0));
-            Logger::merge_session_log(false, $source_id);
         }
+        Logger::merge_session_log();
     }
 
     /**
@@ -1314,7 +1313,7 @@ class Converter
      * @param mixed $id
      * @return bool
      */
-    protected static function is_safe_source_id(mixed $id): bool
+    public static function is_safe_source_id(mixed $id): bool
     {
         $id = (string)$id;
         return $id !== '' && $id !== '.' && $id !== '..'

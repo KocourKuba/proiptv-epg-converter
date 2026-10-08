@@ -1,3 +1,6 @@
+### Version 1.6.3
+- With `--parallel` the temporary log of a worker is written into the directory of its source (`<id>/<id>.log`) instead of `.run`, and it is removed once merged into the main log, whether the source succeeded or failed.
+
 ### Version 1.6.2
 - The time column of the information page is split in two: "Download" shows how long fetching the source took, "Processing" how long unpacking, indexing and JSON generation took.
 

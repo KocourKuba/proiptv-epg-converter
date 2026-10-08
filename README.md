@@ -58,7 +58,7 @@ To run it automatically every 12 hours, add a cron job like:
                                'auto' uses the number of CPU cores.
 ```
 
-With `-m` / `--parallel` the sources are processed by up to N worker processes at once. On Linux the workers are forked processes (pcntl), everywhere else separate PHP processes are started, so no extra extension is required. Each worker runs a full conversion, so the peak memory usage is about N times that of a single source. Every worker writes its own temporary log, which is merged into the main log as one contiguous block when the source finishes; after a successful conversion it is removed, a failed source keeps it with a pointer line in the main log.
+With `-m` / `--parallel` the sources are processed by up to N worker processes at once. On Linux the workers are forked processes (pcntl), everywhere else separate PHP processes are started, so no extra extension is required. Each worker runs a full conversion, so the peak memory usage is about N times that of a single source. Every worker writes its own temporary log into the directory of its source (`<id>/<id>.log`), which is merged into the main log as one contiguous block and removed when the source finishes, whether it succeeded or failed.
 
 <details>
 <summary><b>Output results</b></summary>
@@ -178,7 +178,7 @@ php run-converter.php -c sources.conf
                                'auto' использует число ядер процессора.
 ```
 
-С параметром `-m` / `--parallel` источники обрабатываются до N рабочими процессами одновременно. В Linux рабочие процессы создаются через fork (pcntl), в остальных системах запускаются отдельные PHP процессы, поэтому дополнительные расширения не требуются. Каждый рабочий процесс выполняет полную конвертацию, поэтому пиковый расход памяти примерно в N раз больше расхода одного источника. Каждый рабочий процесс пишет собственный временный лог, который по завершении источника добавляется в основной лог одним непрерывным блоком; после успешной конвертации он удаляется, неудачный источник сохраняет его со ссылкой в основном логе.
+С параметром `-m` / `--parallel` источники обрабатываются до N рабочими процессами одновременно. В Linux рабочие процессы создаются через fork (pcntl), в остальных системах запускаются отдельные PHP процессы, поэтому дополнительные расширения не требуются. Каждый рабочий процесс выполняет полную конвертацию, поэтому пиковый расход памяти примерно в N раз больше расхода одного источника. Каждый рабочий процесс пишет собственный временный лог в каталог своего источника (`<id>/<id>.log`), который по завершении источника добавляется в основной лог одним непрерывным блоком и удаляется, независимо от того, успешно ли обработан источник.
 
 <details>
 <summary><b>Результаты обработки</b></summary>
