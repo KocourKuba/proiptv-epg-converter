@@ -116,8 +116,8 @@ File format - JSON
 <details>
 <summary><b>Benchmarks</b></summary>>
 The script was tested on VDS with installed Ubuntu 24.04 (4 vCPU / 8 GB RAM).  
-Processing xmltv from edem (48Mb packed gz, size of unpacked xmltv 373Mb) - 16 seconds.  
-Processing xmltv from gabbarit (228Mb packed gz, size of unpacked xmltv 1.6Gb) - 51 seconds.
+Processing xmltv from edem (48Mb packed gz, size of unpacked xmltv 330) - ~3 seconds.  
+Processing xmltv from gabbarit (228Mb packed gz, size of unpacked xmltv 1.2Gb) - ~10 seconds.
 </details>
 
 ## Описание
@@ -237,6 +237,6 @@ php run-converter.php -c sources.conf
 <details>
 <summary><b>Бенчмарки</b></summary>
 Скрипт проверялся на VDS c Ubuntu 24.04 (4 vCPU / 8 ГБ ОЗУ).  
-Обработка xmltv от edem (48Mb упакованный gz, размер распакованного xmltv 373Mb) - 16 секунд.  
-Обработка xmltv от gabbarit (228Mb упакованный gz, размер распакованного xmltv 1.6Gb) - 51 секунду.  
+Обработка xmltv от edem (48Mb упакованный gz, размер распакованного xmltv 330) - ~3 секунд.  
+Обработка xmltv от gabbarit (228Mb упакованный gz, размер распакованного xmltv 1.2Gb) - 10 секунд.  
 </details>

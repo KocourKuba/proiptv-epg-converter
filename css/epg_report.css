@@ -105,7 +105,7 @@ tbody tr:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); 
 tbody tr:last-child td { border-bottom: 0; }
 .l { text-align: left; }
 .r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.src { min-width: 210px; }
+.src { min-width: 140px; }
 .src .name { display: block; font-weight: 600; text-decoration: none; }
 .src a.name { color: var(--accent); }
 .src a.name:hover { text-decoration: underline; }
