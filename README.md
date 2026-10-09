@@ -47,8 +47,8 @@ To run it automatically every 12 hours, add a cron job like:
     -t, --target=[dir],        Directory were epg files for sources  will be stored.
                                If omitted log created in the same directory as configuration file.
     -p, --purge,               Force purge stalled files.
-    -f, --force,               Force processing."
-    -l, --log=[log path],      Path to log file. If omitted log created in the same directory as configuration file."
+    -f, --force,               Force processing.
+    -l, --log=[log path],      Path to log file. If omitted log created in the same directory as configuration file.
     -s, --severity=[level],    Log level [error, warning, info, notice, debug]. Default is 'info'.
     -w, --html[=file],         Generate an html information page when the conversion is finished.
                                If the file is omitted, the page is saved as 'index.html' in the target directory.
@@ -226,17 +226,19 @@ php run-converter.php -c sources.conf
 
 Поддержка `Etag` включена по умолчанию, если сервер поддерживает `Etag`, то скачивание будет произведено только если файл изменился. В ручном режиме заголовок не посылается, но обновляется после получения заголовков
 
-`id` - обязательный. Уникальный идентификатор источника. Будет использован для создания каталога.  
-`url` - обязательный. Ссылка на xmltv.
-`keep_source` - необязательный. Если задан в true, то сохраняет оригинальный скачанный файл.  
-`manual_check` - необязательный. Задает время следующего скачивания файла в часах. Необходим если сервер не поддерживает Etag, а проверка делается часто.  
-`purge_stalled` - необязательный. Задает количество дней после которых файлы отстутсвующие в текущем источнике будут удалены. По умолчанию 7 дней.
+`id` - обязательный. Уникальный идентификатор источника. Будет использован для создания каталога.    
+`url` - обязательный. Ссылка на xmltv.  
+`keep_source` - необязательный. Если задан в true, то сохраняет оригинальный скачанный файл.    
+`manual_check` - необязательный. Задает время следующего скачивания файла в часах. Необходим если сервер не поддерживает Etag, а проверка делается часто.    
+`purge_stalled` - необязательный. Задает количество дней после которых файлы отстутсвующие в текущем источнике будут удалены. По умолчанию 7 дней.  
 `verify_ssl` - необязательный. Включить проверку SSL сертификата. По умолчанию true. Установите false для самоподписанных сертификатов.
 </details>
 
 <details>
 <summary><b>Бенчмарки</b></summary>
-Скрипт проверялся на VDS c Ubuntu 24.04 (4 vCPU / 8 ГБ ОЗУ).  
-Обработка xmltv от edem (48Mb упакованный gz, размер распакованного xmltv 330) - ~3 секунд.  
-Обработка xmltv от gabbarit (228Mb упакованный gz, размер распакованного xmltv 1.2Gb) - 10 секунд.  
+Скрипт проверялся на VDS c Ubuntu 24.04 (4 vCPU / 8 ГБ ОЗУ).<br>
+<ul>
+<li>Обработка xmltv от edem (48Mb упакованный gz, размер распакованного xmltv 330) - ~3 секунд.
+<li>Обработка xmltv от gabbarit (228Mb упакованный gz, размер распакованного xmltv 1.2Gb) - 10 секунд.
+</ul>
 </details>
