@@ -267,7 +267,8 @@ abstract class ReportPage
 
     /**
      * A numeric cell carries its raw value in data-v, so the column sorts as a number
-     * and not as the formatted text.
+     * and not as the formatted text. The text is already escaped, like the rest of the
+     * page fragments.
      *
      * @param int $value
      * @param string $text
@@ -275,7 +276,7 @@ abstract class ReportPage
      */
     protected static function cell(int $value, string $text): string
     {
-        return '<td class="r" data-v="' . $value . '">' . self::e($text) . '</td>' . PHP_EOL;
+        return '<td class="r" data-v="' . $value . '">' . $text . '</td>' . PHP_EOL;
     }
 
     /**
