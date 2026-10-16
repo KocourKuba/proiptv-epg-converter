@@ -114,6 +114,11 @@ Sample can be found here: `samples/sample_sources.conf`
 File format - JSON
 `Etag` header support is enabled by default, if the server supports `Etag`, the download will only occur if the file has changed. In manual mode, header is ignored, but is updated after receiving the response headers.
 
+The timeouts are set once, for the whole configuration:
+`connect_timeout` - optional. Timeout for establishing the connection, in seconds. Default is 30.  
+`download_timeout` - optional. Timeout for the whole download, in seconds. 0 means no deadline. Default is 0.
+
+Source parameters:
 `id` - mandatory. Unique identifier of the source. Will be used to create a directory.  
 `url` - mandatory. Link to xmltv  
 `keep_source` - optional. If set to true, it saves the original downloaded file.  
@@ -244,6 +249,11 @@ php run-converter.php -c sources.conf
 
 Поддержка `Etag` включена по умолчанию, если сервер поддерживает `Etag`, то скачивание будет произведено только если файл изменился. В ручном режиме заголовок не посылается, но обновляется после получения заголовков
 
+Таймауты задаются один раз, для всей конфигурации:
+`connect_timeout` - необязательный. Таймаут на установку соединения, в секундах. По умолчанию 30.  
+`download_timeout` - необязательный. Таймаут на всю загрузку, в секундах. 0 означает отсутствие ограничения. По умолчанию 0.
+
+Параметры источника:
 `id` - обязательный. Уникальный идентификатор источника. Будет использован для создания каталога.    
 `url` - обязательный. Ссылка на xmltv.  
 `keep_source` - необязательный. Если задан в true, то сохраняет оригинальный скачанный файл.    

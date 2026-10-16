@@ -69,6 +69,10 @@ class Converter
     const SERVER_BASE_URL = 'server_base_url';
     /** Configuration key holding the list of xmltv sources. */
     const SOURCES = 'sources';
+    /** Configuration key holding the connection timeout, in seconds. */
+    const CONNECT_TIMEOUT = 'connect_timeout';
+    /** Configuration key holding the download timeout, in seconds. */
+    const DOWNLOAD_TIMEOUT = 'download_timeout';
 
     /** Name of the info page when --html is given without one. */
     const HTMLPAGE_DEFAULT = 'index.html';
@@ -83,6 +87,15 @@ class Converter
 
     /** Sent with every request - some hosts reject clients that identify as nothing. */
     const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
+    /** Limit for the connection phase of a download, in seconds, when the configuration gives none. */
+    const DEFAULT_CONNECT_TIMEOUT = 30;
+    /**
+     * Limit for the whole download, in seconds, when the configuration gives none. Zero
+     * sets no deadline: a multi-gigabyte source on a slow link needs far more than a
+     * fixed timeout. A stalled transfer is caught by the low-speed limit instead.
+     */
+    const DEFAULT_DOWNLOAD_TIMEOUT = 0;
 
     /** Largest slice of xml handed to DOMDocument at once, in bytes. */
     const PARSE_CHUNK_SIZE = 2097152;
@@ -109,6 +122,10 @@ class Converter
     private float $detail_time = 0.0;
     /** @var string Address the target directory is served from, without a trailing slash. */
     private string $base_url = self::PRESET_BASE_URL;
+    /** @var int Limit for the connection phase of a download, in seconds. */
+    private int $connect_timeout = self::DEFAULT_CONNECT_TIMEOUT;
+    /** @var int Limit for the whole download, in seconds; 0 sets no deadline. */
+    private int $download_timeout = self::DEFAULT_DOWNLOAD_TIMEOUT;
     /** @var bool Collect stats even without an info page - a worker must, for its result file. */
     private bool $force_stats = false;
 
@@ -199,6 +216,8 @@ class Converter
 
         $sources = $this->read_config($config);
         Logger::log(Logger::Inf, "Server address: $this->base_url");
+        Logger::log(Logger::Inf, "Connect timeout: " . var_export($this->connect_timeout, true));
+        Logger::log(Logger::Inf, "Download timeout: " . var_export($this->download_timeout, true));
 
         $this->json_links = isset($converter_config[self::JSONLINKS]);
         $this->channel_icons = (bool)safe_get_value($converter_config, self::CHANNEL_ICONS, true);
@@ -308,6 +327,8 @@ class Converter
                 'json_links' => $this->json_links,
                 'channel_icons' => $this->channel_icons,
                 'index_link' => $this->index_link,
+                'connect_timeout' => $this->connect_timeout,
+                'download_timeout' => $this->download_timeout,
                 'script' => dirname(__DIR__) . '/run-converter.php',
             ), function (int $index, array $result) use (&$collected, &$success, &$failed, &$skipped, $work_keys) {
                 $collected[$work_keys[$index]] = $result;
@@ -419,7 +440,6 @@ class Converter
                 . var_export($verify_ssl, true));
             $verify_ssl = filter_var($verify_ssl, FILTER_VALIDATE_BOOL);
         }
-
         // only a first guess - download() replaces it with the name the server announces
         $xmltv_source = "$this->working_dir/$source_id/" . self::url_filename($url, "$source_id.xmltv");
 
@@ -619,6 +639,8 @@ class Converter
         $converter->json_links = (bool)safe_get_value($payload, self::JSONLINKS, false);
         $converter->channel_icons = (bool)safe_get_value($payload, self::CHANNEL_ICONS, true);
         $converter->index_link = (string)safe_get_value($payload, 'index_link', '');
+        $converter->connect_timeout = (int)safe_get_value($payload, self::CONNECT_TIMEOUT, self::DEFAULT_CONNECT_TIMEOUT);
+        $converter->download_timeout = (int)safe_get_value($payload, self::DOWNLOAD_TIMEOUT, self::DEFAULT_DOWNLOAD_TIMEOUT);
 
         $source = safe_get_value($payload, 'source', array());
         $result_file = (string)safe_get_value($payload, 'result_file', '');
@@ -976,7 +998,8 @@ class Converter
      *
      * "server_base_url" is the address the target directory is served from. Without it the
      * address stays the PRESET_BASE_URL placeholder. A configuration that is just the list
-     * of sources, the older format, is still read, with no address.
+     * of sources, the older format, is still read, with no address. "connect_timeout" and
+     * "download_timeout" set the limits of every download, in seconds.
      *
      * @param mixed $config Decoded configuration file.
      * @return array The sources.
@@ -998,6 +1021,9 @@ class Converter
         } else {
             $this->base_url = $url;
         }
+
+        $this->connect_timeout = self::config_timeout($config, self::CONNECT_TIMEOUT, self::DEFAULT_CONNECT_TIMEOUT);
+        $this->download_timeout = self::config_timeout($config, self::DOWNLOAD_TIMEOUT, self::DEFAULT_DOWNLOAD_TIMEOUT);
 
         $sources = safe_get_value($config, self::SOURCES, array());
         return is_array($sources) ? array_values($sources) : array();
@@ -1027,6 +1053,27 @@ class Converter
         }
 
         return $page;
+    }
+
+    /**
+     * A timeout from the configuration, or the default when it is missing or not a
+     * non-negative integer of seconds.
+     *
+     * @param array $config
+     * @param string $key
+     * @param int $default
+     * @return int
+     */
+    private static function config_timeout(array $config, string $key, int $default): int
+    {
+        $value = safe_get_value($config, $key, $default);
+        if (is_int($value) && $value >= 0) {
+            return $value;
+        }
+
+        Logger::log(Logger::Wrn, "$key should be a non-negative integer of seconds, got: "
+            . var_export($value, true) . " - using the default $default");
+        return $default;
     }
 
     /**
@@ -1070,10 +1117,8 @@ class Converter
         $opts[CURLOPT_URL] = $url;
         $opts[CURLOPT_SSL_VERIFYPEER] = $verify_ssl ? 1 : 0;
         $opts[CURLOPT_SSL_VERIFYHOST] = $verify_ssl ? 2 : 0;
-        $opts[CURLOPT_CONNECTTIMEOUT] = 30;
-        // No overall deadline: a multi-gigabyte source on a slow link needs far more than
-        // a fixed timeout. A stalled transfer is caught by the low-speed limit instead.
-        $opts[CURLOPT_TIMEOUT] = 0;
+        $opts[CURLOPT_CONNECTTIMEOUT] = $this->connect_timeout;
+        $opts[CURLOPT_TIMEOUT] = $this->download_timeout;
         $opts[CURLOPT_LOW_SPEED_LIMIT] = 512;
         $opts[CURLOPT_LOW_SPEED_TIME] = 120;
         $opts[CURLOPT_RETURNTRANSFER] = 1;

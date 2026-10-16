@@ -226,6 +226,8 @@ final class WorkerPool
                 'json_links' => (bool)safe_get_value($options, 'json_links', false),
                 'channel_icons' => (bool)safe_get_value($options, 'channel_icons', true),
                 'index_link' => (string)safe_get_value($options, 'index_link', ''),
+                'connect_timeout' => (int)safe_get_value($options, 'connect_timeout', Converter::DEFAULT_CONNECT_TIMEOUT),
+                'download_timeout' => (int)safe_get_value($options, 'download_timeout', Converter::DEFAULT_DOWNLOAD_TIMEOUT),
                 'source' => $source,
                 'result_file' => $result_file,
                 'session_log' => (string)self::session_log_path($options['working_dir'], $source),
