@@ -269,8 +269,15 @@ final class HtmlReport extends ReportPage
         $row .= self::cell($source->files, self::num($source->files));
         $row .= self::cell($source->files_size, convert_bytes($source->files_size));
         $row .= '<td class="l" data-v="' . $source->last_update . '">' . $updated . '</td>' . PHP_EOL;
-        $row .= self::cell((int)round($source->download_time * 1000), self::duration($source->download_time));
-        $row .= self::cell((int)round($source->index_time * 1000), self::duration($source->index_time));
+        // an up to date source only cost a check against the server - it spent no time
+        // downloading or indexing, so those columns stay empty for it
+        if ($source->status === SourceStatus::UP_TO_DATE) {
+            $row .= self::cell(0, '&mdash;');
+            $row .= self::cell(0, '&mdash;');
+        } else {
+            $row .= self::cell((int)round($source->download_time * 1000), self::duration($source->download_time));
+            $row .= self::cell((int)round($source->index_time * 1000), self::duration($source->index_time));
+        }
         $row .= self::cell((int)round($source->store_time * 1000), self::duration($source->store_time));
 
         $row .= '</tr>' . PHP_EOL;

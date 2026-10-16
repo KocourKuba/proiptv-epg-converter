@@ -1,3 +1,8 @@
+### Upcoming version
+- New configuration options `connect_timeout` and `download_timeout`: timeouts for establishing the connection and for the whole download, in seconds, set once for every source. When not set, the built-in values are used (30 s for the connection, 0 - no deadline - for the download).
+- The information page leaves the Download and Indexing columns empty (`&mdash;`) for a source that was up to date, since it was neither downloaded nor indexed.
+- Fixed the source page showing the literal text `&mdash;` in the Size column of a channel without a guide.
+
 ### Version 1.6.5
 - Channel icons are collected into `channels_info.json` under the `picons_info` node (channel id => icon url). A source without icons gets no node.
 - New option `-n, --no-icons`: do not write the `picons_info` node. The node is written by default.
