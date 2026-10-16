@@ -224,6 +224,7 @@ final class WorkerPool
                 'purge' => (bool)$options['purge'],
                 'collect_report' => (bool)$options['collect_report'],
                 'json_links' => (bool)safe_get_value($options, 'json_links', false),
+                'channel_icons' => (bool)safe_get_value($options, 'channel_icons', true),
                 'index_link' => (string)safe_get_value($options, 'index_link', ''),
                 'source' => $source,
                 'result_file' => $result_file,

@@ -29,8 +29,8 @@ require_once __DIR__ . '/autoload.php';
 
 ini_set('memory_limit', '256M');
 
-$shortopts = "c:r:t:fpl:s:w::jm:";
-$longopts = array('config:', 'run:', 'target:', 'force', 'purge', 'log:', 'severity:', 'html::', 'json-links', 'parallel:', 'worker:');
+$shortopts = "c:r:t:fpl:s:w::jnm:";
+$longopts = array('config:', 'run:', 'target:', 'force', 'purge', 'log:', 'severity:', 'html::', 'json-links', 'no-icons', 'parallel:', 'worker:');
 $options = getopt($shortopts, $longopts);
 $to_process = [];
 $log_path = '';
@@ -85,6 +85,11 @@ foreach ($options as $opt => $value) {
             $converter_config[Converter::JSONLINKS] = true;
             break;
 
+        case 'n':
+        case 'no-icons':
+            $converter_config[Converter::CHANNEL_ICONS] = false;
+            break;
+
         case 'm':
         case 'parallel':
             $converter_config[Converter::PARALLEL] = $value;
@@ -124,6 +129,8 @@ if (empty($converter_config['config_file'])) {
     echo "                             If file omitted, page saved as 'index.html' in the target directory." . PHP_EOL;
     echo "  -j, --json-links,          Link each channel on the source detail page to its json file." . PHP_EOL;
     echo "                             If omitted, the ids are shown as plain text." . PHP_EOL;
+    echo "  -n, --no-icons,            Do not write the picons_info node (channel id => icon url) in channels_info.json." . PHP_EOL;
+    echo "                             If omitted, it is written for every source that has channel icons." . PHP_EOL;
     echo "  -m, --parallel=[N],        Number of sources processed in parallel (default: 1)." . PHP_EOL;
     echo "                             'auto' uses the number of CPU cores." . PHP_EOL;
     echo PHP_EOL;

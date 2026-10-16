@@ -1,3 +1,8 @@
+### Version 1.6.5
+- Channel icons are collected into `channels_info.json` under the `picons_info` node (channel id => icon url). A source without icons gets no node.
+- New option `-n, --no-icons`: do not write the `picons_info` node. The node is written by default.
+- A channel without programmes keeps its aliases and icon in `channels_info.json` (`epg_aliases` and `picons_info`); `epg_id` lists only the channels that have a guide. The source page lists the channel, only without a guide link, period and size.
+
 ### Version 1.6.4
 - The "Processing" column of the information page is split in two: "Indexing" shows how long indexing the source took, "Storing" how long writing the JSON files took.
 - The "Download" column includes the time spent unpacking the source.

@@ -54,6 +54,9 @@ To run it automatically every 12 hours, add a cron job like:
                                If the file is omitted, the page is saved as 'index.html' in the target directory.
     -j, --json-links,          Link each channel on the source detail page to its json file.
                                If omitted, the ids are shown as plain text.
+    -n, --no-icons,            Do not write the picons_info node (channel id => icon url)
+                               in channels_info.json. If omitted, it is written for every
+                               source that has channel icons.
     -m, --parallel=[N],        Number of sources processed in parallel (default: 1).
                                'auto' uses the number of CPU cores.
 ```
@@ -63,6 +66,12 @@ With `-m` / `--parallel` the sources are processed by up to N worker processes a
 <details>
 <summary><b>Output results</b></summary>
 For example, our source is edem, and the EPG channel ID is '146'. The link to the TV program for the channel will look like this: http://your.server/edem/epg/146.json
+
+Next to the guides each source gets `channels_info.json` with its EPG ids - only those that have a guide - and aliases, and, when the source has channel icons, their map as the `picons_info` node (channel id => icon url):
+```
+"picons_info": {"146": "http://example.com/icons/146.png", "147": "http://example.com/icons/147.png"}
+```
+Aliases and icons are collected for every channel the source lists - with programmes or not, a channel keeps its identity. A source without icons gets no `picons_info` node; `-n` / `--no-icons` turns it off for every source.
 </details>
 
 <details>
@@ -73,7 +82,7 @@ The page lists every processed source with its status (converted / up to date / 
 
 Every source in the configuration gets a row, including the ones a `--run` left out - those are marked `not run` and still report what they currently serve. The numbers for each source come from its `<id>.db` and the files on disk, not from the run itself.
 
-Each source also gets its own page at `<target>/<id>/index.html`, reached by clicking the source name on the index. It lists every channel the source serves with its picon, its EPG id, the display names it can also be reached by, the period its guide covers, how deep that guide goes, and the size of its JSON file. A channel whose guide is shorter than a day shows `<1 d`.
+Each source also gets its own page at `<target>/<id>/index.html`, reached by clicking the source name on the index. It lists every channel the source serves with its picon, its EPG id, the display names it can also be reached by, the period its guide covers, how deep that guide goes, and the size of its JSON file - a channel without programmes is listed too, just without a guide link, period and size. A channel whose guide is shorter than a day shows `<1 d`.
 
 With `-j` / `--json-links` each id on that page links to the guide it is served from, and the page points at `channels_info.json` as a link too. Without it - the default - the ids are plain text and the file names are only named, so a page served publicly does not advertise the files behind it. The guides themselves stay reachable by their url either way; the option only decides whether the page links to them.
 
@@ -174,6 +183,9 @@ php run-converter.php -c sources.conf
                                Если файл не задан, страница сохраняется как 'index.html' в корневом каталоге.
     -j, --json-links,          Делать id каждого канала на странице источника ссылкой на его json файл.
                                Если не задан, id показываются обычным текстом.
+    -n, --no-icons,            Не записывать узел picons_info (id канала => ссылка на иконку)
+                               в channels_info.json. Если не указан, узел записывается для
+                               каждого источника, в котором есть иконки каналов.
     -m, --parallel=[N],        Количество источников, обрабатываемых параллельно (по умолчанию: 1).
                                'auto' использует число ядер процессора.
 ```
@@ -183,6 +195,12 @@ php run-converter.php -c sources.conf
 <details>
 <summary><b>Результаты обработки</b></summary>
 Например, у нас источник edem, а EPG ID канала '146'. Ссылка на ТВ программу для канала будет выглядеть так: http://your.server/edem/epg/146.json
+
+Рядом с телепрограммами для каждого источника создается `channels_info.json` со списком EPG id - только тех, у которых есть телепрограмма - и псевдонимов, а если в источнике есть иконки каналов - их список в узле `picons_info` (id канала => ссылка на иконку):
+```
+"picons_info": {"146": "http://example.com/icons/146.png", "147": "http://example.com/icons/147.png"}
+```
+Псевдонимы и иконки собираются для всех каналов источника - с телепрограммой или без, канал сохраняет свою идентичность. Для источника без иконок узел `picons_info` не создается; параметр `-n` / `--no-icons` отключает его для всех источников.
 </details>
 
 <details>
@@ -193,7 +211,7 @@ php run-converter.php -c sources.conf
 
 На странице присутствуют все источники из конфигурационного файла, в том числе не попавшие в текущий запуск из-за `--run` - они помечены как `not run` и показывают то, что отдают сейчас. Все цифры по источнику читаются из его `<id>.db` и файлов на диске, а не из результатов запуска.
 
-Для каждого источника также создается своя страница `<target>/<id>/index.html`, переход на нее - по имени источника на главной странице. На ней перечислены все каналы источника: пикон, EPG id, псевдонимы, период, который покрывает его телепрограмма, ее глубина и размер его json файла. Канал с программой меньше суток показывается как `<1 d`.
+Для каждого источника также создается своя страница `<target>/<id>/index.html`, переход на нее - по имени источника на главной странице. На ней перечислены все каналы источника: пикон, EPG id, псевдонимы, период, который покрывает его телепрограмма, ее глубина и размер его json файла - канал без телепрограммы тоже попадает на страницу, но без ссылки на телепрограмму, периода и размера. Канал с программой меньше суток показывается как `<1 d`.
 
 С параметром `-j` / `--json-links` каждый id на этой странице ведет на телепрограмму этого канала, а `channels_info.json` тоже становится ссылкой. Без него (поведение по умолчанию) id показываются обычным текстом, а имена файлов только упоминаются - чтобы страница, отдаваемая наружу, не публиковала ссылки на файлы. Сами телепрограммы в любом случае доступны по своим адресам, параметр влияет только на ссылки на странице.
 

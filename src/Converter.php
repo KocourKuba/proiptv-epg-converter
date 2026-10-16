@@ -49,6 +49,15 @@ class Converter
     const JSONLINKS = 'json_links';
     const PARALLEL = 'parallel';
     const WORKER = 'worker';
+    const CHANNEL_ICONS = 'channel_icons';
+
+    /**
+     * Index of a source, written into its epg directory: the epg ids, the aliases they
+     * can also be reached by, and - when the source has icons - their urls as 'picons_info'.
+     */
+    const CHANNELS_INFO_FILE = 'channels_info.json';
+    /** Files of the epg directory that are not the guide of a channel. */
+    const SERVICE_FILES = array(self::CHANNELS_INFO_FILE);
 
     /** File with the ProIPTV epg presets, written on every run. */
     const PRESETS_FILE = 'epg_presets.json';
@@ -92,6 +101,8 @@ class Converter
     private string $index_link = '';
     /** @var bool Whether the detail pages link to the json files they list. */
     private bool $json_links = false;
+    /** @var bool Whether channels_info.json carries the 'picons_info' node. */
+    private bool $channel_icons = true;
     /** @var float|null Seconds the last detail page took, null when it was not rebuilt. */
     private ?float $last_detail_time = null;
     /** @var float Seconds every detail page of this run took together. */
@@ -190,6 +201,8 @@ class Converter
         Logger::log(Logger::Inf, "Server address: $this->base_url");
 
         $this->json_links = isset($converter_config[self::JSONLINKS]);
+        $this->channel_icons = (bool)safe_get_value($converter_config, self::CHANNEL_ICONS, true);
+        Logger::log(Logger::Inf, 'Channel icons: ' . var_export($this->channel_icons, true));
 
         $html_page = $this->resolve_html_page($converter_config);
         if ($html_page !== null) {
@@ -293,6 +306,7 @@ class Converter
                 'purge' => $force_purge,
                 'collect_report' => $this->report !== null,
                 'json_links' => $this->json_links,
+                'channel_icons' => $this->channel_icons,
                 'index_link' => $this->index_link,
                 'script' => dirname(__DIR__) . '/run-converter.php',
             ), function (int $index, array $result) use (&$collected, &$success, &$failed, &$skipped, $work_keys) {
@@ -603,6 +617,7 @@ class Converter
         $converter->working_dir = (string)safe_get_value($payload, 'working_dir', '');
         $converter->force_stats = (bool)safe_get_value($payload, 'collect_report', false);
         $converter->json_links = (bool)safe_get_value($payload, self::JSONLINKS, false);
+        $converter->channel_icons = (bool)safe_get_value($payload, self::CHANNEL_ICONS, true);
         $converter->index_link = (string)safe_get_value($payload, 'index_link', '');
 
         $source = safe_get_value($payload, 'source', array());
@@ -719,8 +734,8 @@ class Converter
 
         // One pass over the directory serves both pages: the summary needs the count and
         // the total, the detail page needs the size of each channel's file.
-        // channels_info.json is the index of the directory, not a channel, so it adds to
-        // the size on disk but not to the number of guides served
+        // channels_info.json describes the directory, not a channel, so it adds to the
+        // size on disk but not to the number of guides served
         $files = 0;
         $files_size = 0;
         $files_index = [];
@@ -730,7 +745,7 @@ class Converter
                 $size = (int)$file->getSize();
                 $files_size += $size;
                 $name = $file->getFilename();
-                if ($name !== 'channels_info.json') {
+                if (!in_array($name, self::SERVICE_FILES, true)) {
                     ++$files;
                     $files_index[$name] = $size;
                 }
@@ -776,8 +791,10 @@ class Converter
     {
         $this->last_detail_time = null;
 
-        // nothing indexed yet - a source that has never been converted has nothing to show
-        if (!$db->is_open() || $summary->channels === 0) {
+        // nothing indexed yet - a source that has never been converted has nothing to
+        // show. Channels without programmes still get a page, so 'channels' alone must
+        // not decide: a source that has only such channels is listed, just without links
+        if (!$db->is_open() || ($summary->channels === 0 && $summary->channels_total === 0)) {
             return '';
         }
 
@@ -906,7 +923,7 @@ class Converter
             if (!is_dir($json_path)) continue;
 
             foreach (new FilesystemIterator($json_path, FilesystemIterator::SKIP_DOTS) as $file) {
-                if ($file->isFile() && $file->getExtension() === 'json' && $file->getFilename() !== 'channels_info.json') {
+                if ($file->isFile() && $file->getExtension() === 'json' && !in_array($file->getFilename(), self::SERVICE_FILES, true)) {
                     $aliases[] = $source_id;
                     break;
                 }
@@ -1575,8 +1592,12 @@ class Converter
                     // check if end
                     $end_tv = strpos($line, "</tv>");
                     if ($end_tv !== false) {
-                        $tag_end_pos = $end_tv + $tag_start_pos;
-                        $stm->execute();
+                        // no channel is pending in a source without any programmes - the
+                        // flush would only violate the NOT NULL constraint of channel_id
+                        if ($prev_channel !== null) {
+                            $tag_end_pos = $end_tv + $tag_start_pos;
+                            $stm->execute();
+                        }
                         break;
                     }
 
@@ -1626,20 +1647,19 @@ class Converter
 
             $db->exec('COMMIT;');
 
-            // Cleanup channels without positions
-            $query = 'SELECT COUNT(distinct channel_id) FROM epg_channels WHERE channel_id NOT IN (SELECT distinct channel_id FROM epg_entries);';
-            $cnt = $db->query_value($query);
-
-            if ($cnt) {
-                $db->exec('DELETE FROM epg_channels WHERE channel_id NOT IN (SELECT distinct channel_id FROM epg_entries);');
-            }
+            // Channels without programmes stay in the tables, so their aliases and
+            // picons are still collected into channels_info.json - a channel without a
+            // guide only loses its json file, not its identity.
+            $cnt = (int)$db->query_value('SELECT COUNT(distinct channel_id) FROM epg_channels WHERE channel_id NOT IN (SELECT distinct channel_id FROM epg_entries);');
 
             $total_epg = (int)$db->query_value('SELECT count(DISTINCT channel_id) FROM epg_entries;');
             $total_blocks = (int)$db->query_value('SELECT COUNT(*) FROM epg_entries;');
 
             // kept for the info page, which is also drawn for sources that were skipped
-            // as up to date and so have nothing but the database to report from
-            $served = (int)$db->query_value('SELECT count(DISTINCT channel_id) FROM epg_channels;');
+            // as up to date and so have nothing but the database to report from.
+            // 'channels' stays the ones the source serves - those that have programmes -
+            // while 'channels_total' counts every channel found, with a guide or not
+            $served = (int)$db->query_value('SELECT count(DISTINCT channel_id) FROM epg_channels WHERE channel_id IN (SELECT distinct channel_id FROM epg_entries);');
             self::store_param($db, 'channels', $served);
             self::store_param($db, 'channels_total', $channels);
             self::store_param($db, 'picons', $picons);
@@ -1890,7 +1910,10 @@ class Converter
             return [];
         }
         $db->exec(sprintf("INSERT OR REPLACE INTO epg_params (param, value) VALUES ('last_update', '%d');", time()));
-        $known_channels = $db->fetch_array('SELECT DISTINCT channel_id from epg_channels;', 'channel_id');
+        // Guide files exist only for channels that have programmes, so the known set is
+        // epg_entries - epg_channels also holds channels without a guide, whose stale
+        // files a purge must still catch.
+        $known_channels = $db->fetch_array('SELECT DISTINCT channel_id from epg_entries;', 'channel_id');
 
         $known_channels = array_map(function ($channel_id) {
             return escape_channel_filename((string)$channel_id) . '.json';
@@ -1901,7 +1924,7 @@ class Converter
             $files[] = pathinfo($file, PATHINFO_BASENAME);
         }
 
-        $stalled = array_diff($files, $known_channels, array('channels_info.json'));
+        $stalled = array_diff($files, $known_channels, self::SERVICE_FILES);
         $purged = [];
         if (!empty($stalled)) {
             Logger::log(Logger::Dbg, "Stalled files: " . implode(',', $stalled));
@@ -1934,13 +1957,50 @@ class Converter
             SqlWrapper::sql_quote($param), SqlWrapper::sql_quote((string)$value)));
     }
 
+    /**
+     * Write channels_info.json - the index of a source: the epg ids of the channels that
+     * have a guide, the aliases every channel can also be reached by, and, when the source
+     * has icons, their urls as the 'picons_info' node (channel id => icon url). A channel
+     * without programmes keeps its aliases and icon, only its id leaves the epg_id list.
+     * A source with no icons, or a run with the icons turned off, gets no node.
+     *
+     * @param SqlWrapper $db
+     * @param string $json_path
+     * @return void
+     */
     protected function save_channels_info(SqlWrapper $db, string $json_path): void
     {
-        $info['epg_id'] = $db->fetch_array('SELECT DISTINCT channel_id from epg_channels order by channel_id;', 'channel_id');
+        // only channels that have programmes serve a guide, so epg_id lists just those
+        // while the aliases and picons below still cover every channel the source knows
+        $info['epg_id'] = $db->fetch_array('SELECT DISTINCT channel_id from epg_channels'
+            . ' WHERE channel_id IN (SELECT DISTINCT channel_id FROM epg_entries) order by channel_id;', 'channel_id');
         $aliases = $db->fetch_array('SELECT alias, channel_id from epg_channels WHERE alias_orig != channel_id ORDER BY alias;');
         foreach ($aliases as $channel) {
             $info['epg_aliases'][$channel['alias']] = $channel['channel_id'];
         }
-        file_put_contents("$json_path/channels_info.json", json_encode($info, JSON_UNESCAPED_UNICODE));
+
+        $icons = [];
+        if ($this->channel_icons) {
+            $query = 'SELECT DISTINCT ch.channel_id, pic.picon_url FROM epg_channels AS ch'
+                . ' JOIN epg_picons AS pic ON ch.picon_hash = pic.picon_hash ORDER BY ch.channel_id;';
+            foreach ($db->fetch_array($query) as $row) {
+                $channel_id = (string)$row['channel_id'];
+                if (!isset($icons[$channel_id]) && !empty($row['picon_url'])) {
+                    $icons[$channel_id] = (string)$row['picon_url'];
+                }
+            }
+        }
+
+        if (empty($icons)) {
+            Logger::log(Logger::Inf, $this->channel_icons ? 'No channel icons in source' : 'Channel icons disabled');
+        } else {
+            // decoded into an object, so a map of numeric ids never turns into a list
+            $info['picons_info'] = json_decode(json_encode($icons,
+                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_FORCE_OBJECT));
+            Logger::log(Logger::Inf, 'Channel icons saved: ' . count($icons));
+        }
+
+        file_put_contents("$json_path/" . self::CHANNELS_INFO_FILE,
+            json_encode($info, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
     }
 }
