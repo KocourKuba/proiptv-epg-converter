@@ -1,7 +1,11 @@
-### Upcoming version
+### Version 1.6.6
 - New configuration options `connect_timeout` and `download_timeout`: timeouts for establishing the connection and for the whole download, in seconds, set once for every source. When not set, the built-in values are used (30 s for the connection, 0 - no deadline - for the download).
 - The information page leaves the Download and Indexing columns empty (`&mdash;`) for a source that was up to date, since it was neither downloaded nor indexed.
 - Fixed the source page showing the literal text `&mdash;` in the Size column of a channel without a guide.
+- A `gz` archive whose name is unpacked to the name of an existing directory is unpacked under the same name with an `xml` extension: an archive `epg.gz` no longer collides with the `epg` directory of its source, which made the source fail.
+- An archive that cannot be unpacked is reported as a failed source instead of aborting the run with a fatal error, and a partially written file is removed.
+- Fixed the `-INF` warning of a run that downloaded nothing (`0.00 B` is shown on the information page).
+- Fixed the PHP 8.4 deprecation notice about the implicitly nullable `$column` parameter of `SqlWrapper::fetch_array()`.
 
 ### Version 1.6.5
 - Channel icons are collected into `channels_info.json` under the `picons_info` node (channel id => icon url). A source without icons gets no node.
