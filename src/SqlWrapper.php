@@ -153,7 +153,7 @@ class SqlWrapper
      * @param string|null $column
      * @return array
      */
-    public function fetch_array(string $query, string $column = null): array
+    public function fetch_array(string $query, ?string $column = null): array
     {
         if (empty($query)) {
             return [];

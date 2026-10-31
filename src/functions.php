@@ -111,6 +111,11 @@ function safe_get_value(object|array $src, array|string $param, mixed $default =
  */
 function convert_bytes(int $bytes): string
 {
+    // log(0) is -INF, which cannot be cast to int, and a negative count means nothing
+    if ($bytes <= 0) {
+        return '0.00 B';
+    }
+
     $si_prefix = array('B', 'KB', 'MB', 'GB', 'TB');
     $base = 1024;
     $class = min((int)log($bytes, $base), count($si_prefix) - 1);
@@ -130,33 +135,62 @@ function extractGzipFile(string $archive): ?string
     }
 
     $destination = pathinfo($archive, PATHINFO_DIRNAME);
+    $basename = pathinfo($archive, PATHINFO_FILENAME);
     // an archive without an extension would otherwise be unpacked onto itself,
     // truncating it before a single byte is read
-    $outfile = $destination . '/' . pathinfo($archive, PATHINFO_FILENAME);
+    $outfile = $destination . '/' . $basename;
     if (pathinfo($archive, PATHINFO_EXTENSION) === '') {
         $outfile = $archive . '.xml';
+    } else if (is_dir($outfile)) {
+        // 'epg.gz' would unpack to 'epg', the name of the directory the source keeps
+        // its guides in. Keep the name and give the unpacked guide an xml extension
+        $outfile = $destination . '/' . $basename . '.xml';
+        Logger::log(Logger::Dbg, "Unpack name '$basename' is taken by a directory, using: $outfile");
     }
+
     $gzipped = gzopen($archive, "rb");
     if ($gzipped === false) {
         Logger::log(Logger::Err, 'Cannot open gzip file: ' . $archive);
         return null;
     }
-    $file = fopen($outfile, "w");
 
-    while ($string = gzread($gzipped, 4096*1000)) {
-        fwrite($file, $string, strlen($string));
+    $file = fopen($outfile, "w");
+    if ($file === false) {
+        gzclose($gzipped);
+        Logger::log(Logger::Err, "Cannot create unpacked file: $outfile");
+        return null;
+    }
+
+    $failed = false;
+    while (true) {
+        $string = gzread($gzipped, 4096 * 1000);
+        if ($string === false) {
+            $failed = true;
+            break;
+        }
+        if ($string === '') {
+            break;
+        }
+        if (fwrite($file, $string) !== strlen($string)) {
+            $failed = true;
+            break;
+        }
     }
     gzclose($gzipped);
     fclose($file);
 
-    // Check if file was extracted.
-    if (file_exists($outfile)) {
-        Logger::log(Logger::Inf, 'File ungzipped successfully.');
-        return $outfile;
+    if ($failed) {
+        // a half written guide would only fail later, with an error that does not say
+        // what actually went wrong
+        if (file_exists($outfile)) {
+            unlink($outfile);
+        }
+        Logger::log(Logger::Err, 'Error ungzipping file: ' . $archive);
+        return null;
     }
 
-    Logger::log(Logger::Err, 'Error ungzipping file.');
-    return null;
+    Logger::log(Logger::Inf, 'File ungzipped successfully.');
+    return $outfile;
 }
 
 /**
